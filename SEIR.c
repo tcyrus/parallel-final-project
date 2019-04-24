@@ -30,7 +30,7 @@
 /***************************************************************************/
 
 #define GRID_SIZE 30
-#define THREADS_PER_RANK 0
+#define NUM_THREADS 0
 #define MAX_TICKS 256 // May look into making ticks represent hours, up to a number of days?
 #define POPULATION_RATE 50 // Out of 100
 #define INFECTION_RATE 10 // Out of 100
@@ -55,11 +55,6 @@ const char * stateNames[] = { "B", "F", "S", "E", "I", "R", "D", "W" }; // In ca
 /* Global Vars *************************************************************/
 /***************************************************************************/
 
-/*
-int world_size = -1,
-world_rank = -1;
-*/
-
 double g_time_in_secs = 0,
 io_time_in_secs = 0;
 
@@ -69,21 +64,7 @@ io_start_cycles = 0,
 io_end_cycles = 0;
 
 const double g_processor_frequency = PROC_FREQ;
-
 const double threshold = 0.75;
-
-/*
-int* recv_above;
-int* recv_below;
-int* send_above;
-int* send_below;
-
-MPI_Status mpi_stat;
-MPI_Request recieveUp,
-recieveDown,
-sendUp,
-sendDown;
-*/
 
 typedef struct {
 	unsigned int time_in_state;
@@ -142,7 +123,7 @@ void Init_board(Board* b, size_t width, size_t height) {
 	}
 }
 
-void Destroy_board(BoardChunk* b) {
+void Destroy_board(Board* b) {
 	for (size_t i = 0; i < b->height; i++) {
 		free(b->current[i]);
 		free(b->previous[i]);
@@ -151,24 +132,8 @@ void Destroy_board(BoardChunk* b) {
 	free(b->previous);
 }
 
-void Send_Recv_Init(size_t width) {
-	// Each is one row of the current
-	recv_above = (int*)calloc(width, sizeof(int));
-	recv_below = (int*)calloc(width, sizeof(int));
-	//send_above = (int*)calloc(width, sizeof(int));
-	//send_below = (int*)calloc(width, sizeof(int));
-}
-
-void Send_Recv_Destroy() {
-	// Each is one row of the current
-	free(recv_above);
-	free(recv_below);
-	//free(send_above);
-	//free(send_below);
-}
-
 // Prints the board... Debug purposes 
-void print_board(BoardChunk* b) {
+void print_board(Board* b) {
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
 			printf(" %s ", stateNames[b->current[i][j].my_state]);
@@ -181,7 +146,7 @@ void print_board(BoardChunk* b) {
  Returns the number of people in a given state
  Takes a value from enum state as second argument
 */
-int count_people(BoardChunk* b, state s) {
+int count_people(Board* b, state s) {
 	int count = 0;
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
@@ -196,7 +161,7 @@ int count_people(BoardChunk* b, state s) {
 * Uses the define of INFECTION_RATE to randomly infect a percent of the population
 * This is only to be used as an initialization function before beginning actual testing
 */
-void infect_people(BoardChunk* b) {
+void infect_people(Board* b) {
 	//We will infect a certain percent of the population as a starting point
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
@@ -217,7 +182,7 @@ void infect_people(BoardChunk* b) {
 * We will make the border of the world be a border, so this function will 
 * never recieve a cell on the edge of the grid
 */
-size_t get_infected_neighbors(BoardChunk* b, int x, int y) {
+size_t get_infected_neighbors(Board* b, int x, int y) {
 	// We will not be using wrap around for this version
 	size_t count = 0;
 	int left = x - 1,
@@ -268,8 +233,8 @@ void next_state(Board* b, int x, int y) {
 
 void* rowTick(void* argp) {
 	size_t num_rows = bc.height;
-#if THREADS_PER_RANK
-	num_rows /= THREADS_PER_RANK;
+#if NUM_THREADS
+	num_rows /= NUM_THREADS;
 #endif
 	size_t j = (*((size_t*)argp)) * num_rows;
 	int end = j + num_rows - 1;
@@ -282,48 +247,25 @@ void* rowTick(void* argp) {
 
 	return NULL;
 }
-/*
-void tick(BoardChunk* b) {
-	int rankUp = (world_rank == 0) ? (world_size - 1) : (world_rank - 1),
-		rankDown = (world_rank == (world_size - 1)) ? 0 : (world_rank + 1);
 
-	//memcpy(send_above, b->current[0], sizeof(b->current));
-	send_above = b->current[0];
-	//memcpy(send_below, b->current[b->height-1], sizeof(b->current));
-	send_below = b->current[b->height - 1];
-
+void tick(Board* b) {
+	// Copy Board
 	for (size_t i = 0; i < b->height; i++) {
 		memcpy(b->previous[i], b->current[i], sizeof(b->current));
 	}
 
-	// Send at the beginning of the tick
-	// Send top of chunk to rank+1
-	MPI_Isend(send_above, b->width, MPI_INT, rankUp, 0, MPI_COMM_WORLD, &sendUp);
-
-	// Send bottom of chunk to rank-1
-	MPI_Isend(send_below, b->width, MPI_INT, rankDown, 0, MPI_COMM_WORLD, &sendDown);
-
-	// Recieve from rank-1 as bottom
-	MPI_Irecv(recv_above, b->width, MPI_INT, rankUp, 0, MPI_COMM_WORLD, &recieveUp);
-
-	// Recieve from rank+1 as top
-	MPI_Irecv(recv_below, b->width, MPI_INT, rankDown, 0, MPI_COMM_WORLD, &recieveDown);
-
-#if THREADS_PER_RANK
-	pthread_t* tid = calloc(THREADS_PER_RANK, sizeof(pthread_t));
+#if NUM_THREADS
+	pthread_t* tid = calloc(NUM_THREADS, sizeof(pthread_t));
 #endif
-	size_t* tmpI = calloc(THREADS_PER_RANK, sizeof(size_t));
-
-	MPI_Wait(&recieveUp, &mpi_stat);
-	MPI_Wait(&recieveDown, &mpi_stat);
+	size_t* tmpI = calloc(NUM_THREADS, sizeof(size_t));
 
 	pthread_t parent = pthread_self();
 
 	tmpI[0] = 0;
 
-#if THREADS_PER_RANK
+#if NUM_THREADS
 	// Also need to keep track of current board without changes
-	for (size_t i = 1; i < THREADS_PER_RANK; i++) {
+	for (size_t i = 1; i < NUM_THREADS; i++) {
 		tmpI[i] = i;
 		pthread_create(&(tid[i]), NULL, rowTick, (void*)&tmpI[i]);
 	}
@@ -336,8 +278,8 @@ void tick(BoardChunk* b) {
 		rowTick((void*)&tmpI[0]);
 	}
 
-#if THREADS_PER_RANK
-	for (size_t i = 1; i < THREADS_PER_RANK; i++) {
+#if NUM_THREADS
+	for (size_t i = 1; i < NUM_THREADS; i++) {
 		pthread_join(tid[i], NULL);
 	}
 
@@ -348,29 +290,19 @@ void tick(BoardChunk* b) {
 	int** tmp = b->current;
 	b->current = b->previous;
 	b->previous = tmp;
-}*/
+}
 
 /***************************************************************************/
 /* Function: Main **********************************************************/
 /***************************************************************************/
 
 int main(int argc, char *argv[]) {
-	// Example MPI startup and using CLCG4 RNG
-	MPI_Init(&argc, &argv);
-	MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+	g_start_cycles = (unsigned long long)GetTimeBase();
 
-
-	if (world_rank == 0) {
-		g_start_cycles = (unsigned long long)GetTimeBase();
-	}
-	//Using built in random for now, may change out later
+	// Using built in random for now, may change out later
 	srand(time(NULL));
 
-	size_t chunk = GRID_SIZE / world_size;
-	Init_board(&bc, GRID_SIZE, chunk);
-	Send_Recv_Init(bc.width);
-
+	Init_board(&bc, GRID_SIZE, GRID_SIZE);
 	print_board(&bc);
 
 	int people = count_people(&bc, S);
@@ -383,17 +315,9 @@ int main(int argc, char *argv[]) {
 
 	print_board(&bc);
 
+	g_end_cycles = (unsigned long long)GetTimeBase();
+	g_time_in_secs = g_end_cycles - g_start_cycles;
+	printf("Time = %f\n", g_time_in_secs);
 
-	if (world_rank == 0) {
-		g_end_cycles = (unsigned long long)GetTimeBase();
-		g_time_in_secs = g_end_cycles - g_start_cycles;
-		printf("Time = %f\n", g_time_in_secs);
-	}
-
-	MPI_Barrier(MPI_COMM_WORLD);
-
-	// END -Perform a barrier and then leave MPI
-	MPI_Barrier(MPI_COMM_WORLD);
-	MPI_Finalize();
 	return 0;
 }
