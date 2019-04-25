@@ -23,9 +23,7 @@
 #define PROC_FREQ 1600000000.0
 #else
 #define GetTimeBase MPI_Wtime
-/*
-double GetTimeBase() { return (double)clock() / CLOCKS_PER_SEC; }
-*/
+/*double GetTimeBase() { return (double)clock() / CLOCKS_PER_SEC; }*/
 #define PROC_FREQ 1.0
 #endif
 
@@ -35,8 +33,8 @@ double GetTimeBase() { return (double)clock() / CLOCKS_PER_SEC; }
 
 #define GRID_SIZE 30
 #define NUM_THREADS 4
-#define NUM_TICKS 30
-#define MAX_TICKS 256 // May look into making ticks represent hours, up to a number of days?
+// May look into making ticks represent hours, up to a number of days?
+#define MAX_TICKS 256
 #define POPULATION_RATE 50 // Out of 100
 #define INFECTION_RATE 10 // Out of 100
 #define OUT_FILE "thresh.txt"
@@ -77,15 +75,9 @@ int world_size = -1;
 int world_rank = -1;
 
 double g_time_in_secs = 0;
-double io_time_in_secs = 0;
 
 unsigned long long g_start_cycles = 0;
 unsigned long long g_end_cycles = 0;
-unsigned long long io_start_cycles = 0;
-unsigned long long io_end_cycles = 0;
-
-const double g_processor_frequency = PROC_FREQ;
-const double threshold = 0.75;
 
 typedef struct {
 	unsigned int time_in_state;
@@ -380,17 +372,17 @@ int main(int argc, char *argv[]) {
     PrintBoard(&bc);
 #endif
 
-    unsigned long long* infectedCount = (unsigned long long*)calloc(NUM_TICKS, sizeof(unsigned long long));
+    unsigned long long* infectedCount = (unsigned long long*)calloc(MAX_TICKS, sizeof(unsigned long long));
 
     // Begin actual experiment
-	for (size_t i = 0; i < NUM_TICKS; i++) {
+	for (size_t i = 0; i < MAX_TICKS; i++) {
 	    tick(&bc);
         infectedCount[i] = count_people(&bc, INFECTED_CELL) + count_people(&bc, WITHOUT_CELL);
         MPI_Barrier(MPI_COMM_WORLD);
 	}
 
     unsigned long long global_sum = 0;
-    for (size_t i = 0; i < NUM_TICKS; i++) {
+    for (size_t i = 0; i < MAX_TICKS; i++) {
         global_sum = 0;
 
         MPI_Reduce((void*)&(infectedCount[i]), (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -433,7 +425,7 @@ int main(int argc, char *argv[]) {
 
     if (world_rank == 0) {
         g_end_cycles = (unsigned long long) GetTimeBase();
-        g_time_in_secs = (double)(g_end_cycles - g_start_cycles) / g_processor_frequency;
+        g_time_in_secs = (double)(g_end_cycles - g_start_cycles) / PROC_FREQ;
         printf("Time = %f\n", g_time_in_secs);
     }
 
