@@ -31,7 +31,7 @@ double GetTimeBase() {
 /***************************************************************************/
 
 #define GRID_SIZE 30
-#define NUM_THREADS 2
+#define NUM_THREADS 4
 #define MAX_TICKS 256 // May look into making ticks represent hours, up to a number of days?
 #define POPULATION_RATE 50 // Out of 100
 #define INFECTION_RATE 10 // Out of 100
@@ -90,7 +90,7 @@ typedef struct {
 	size_t width;
 	size_t height;
 	Person** current;
-	Person** previous;
+	Person** next;
 } Board;
 
 // May be a way to store the updated values before we finish going through all values
@@ -101,7 +101,7 @@ Board bc;
 /***************************************************************************/
 
 void InitPerson(Person* person) {
-	person->age = (random() % 89) + 1;
+	person->age = (unsigned int) ((random() % 89) + 1);
 	person->time_in_state = 0;
 }
 
@@ -111,18 +111,24 @@ void InitBoard(Board* b, size_t width, size_t height) {
 	b->width = width;
 	b->height = height;
 	b->current = calloc(height, sizeof(Person*));
-	b->previous = calloc(height, sizeof(Person*));
+	b->next = calloc(height, sizeof(Person*));
 
 	for (size_t i = 0; i < height; i++) {
 		b->current[i] = calloc(width, sizeof(Person));
-		b->previous[i] = calloc(width, sizeof(Person));
+		b->next[i] = calloc(width, sizeof(Person));
 
 		for (size_t j = 0; j < width; j++) {
-			//Init based on population of board
+			// Init based on population of board
 			int chance = random() % 100;
 			InitPerson(&(b->current[i][j]));
 
-            b->current[i][j].state = (chance > POPULATION_RATE) ? SUCEPTIBLE_CELL : FREE_CELL;
+            if (i == 0 || j == 0 || i == height-1 || j == width-1) {
+                b->current[i][j].state = BOARDER_CELL;
+            } else if (chance > POPULATION_RATE) {
+				b->current[i][j].state = SUCEPTIBLE_CELL;
+			} else {
+				b->current[i][j].state = FREE_CELL;
+			}
 		}
 	}
 }
@@ -130,10 +136,10 @@ void InitBoard(Board* b, size_t width, size_t height) {
 void DestroyBoard(Board* b) {
 	for (size_t i = 0; i < b->height; i++) {
 		free(b->current[i]);
-		free(b->previous[i]);
+		free(b->next[i]);
 	}
 	free(b->current);
-	free(b->previous);
+	free(b->next);
 }
 
 #ifdef DEBUG
@@ -171,7 +177,7 @@ void infect_people(Board* b) {
 	//We will infect a certain percent of the population as a starting point
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
-			if (b->previous[i][j].state != SUCEPTIBLE_CELL) {
+			if (b->current[i][j].state != SUCEPTIBLE_CELL) {
 				int infected = random() % 100;
 				if (infected < INFECTION_RATE) {
 					b->current[i][j].state = INFECTED_CELL;
@@ -188,7 +194,7 @@ void infect_people(Board* b) {
 * We will make the border of the world be a border, so this function will 
 * never recieve a cell on the edge of the grid
 */
-size_t get_infected_neighbors(Board* b, int x, int y) {
+int get_infected_neighbors(Board* b, int x, int y) {
 	// We will not be using wrap around for this version
 	size_t count = 0;
 	int left = x - 1,
@@ -198,17 +204,17 @@ size_t get_infected_neighbors(Board* b, int x, int y) {
 
 	// We only care about infected cells in state I,
 	// infected cells in state W are non-infectious
-    count += (b->previous[x][up].state == INFECTED_CELL);
-    count += (b->previous[x][down].state == INFECTED_CELL);
+    count += (b->current[x][up].state == INFECTED_CELL);
+    count += (b->current[x][down].state == INFECTED_CELL);
 	if (left >= 0) {
-        count += (b->previous[left][y].state == INFECTED_CELL);
-        count += (up < b->height) && (b->previous[left][up].state == INFECTED_CELL);
-        count += (down >= 0) && (b->previous[left][down].state == INFECTED_CELL);
+        count += (b->current[left][y].state == INFECTED_CELL);
+        count += (y == b->height - 1) && (b->current[left][up].state == INFECTED_CELL);
+        count += (down >= 0) && (b->current[left][down].state == INFECTED_CELL);
     }
     if (right < b->width) {
-        count += (b->previous[right][y].state == INFECTED_CELL);
-        count += (up < b->height) && (b->previous[right][up].state == INFECTED_CELL);
-        count += (down >= 0) && (b->previous[right][down].state == INFECTED_CELL);
+        count += (b->current[right][y].state == INFECTED_CELL);
+        count += (y == b->height - 1) && (b->current[right][up].state == INFECTED_CELL);
+        count += (down >= 0) && (b->current[right][down].state == INFECTED_CELL);
     }
 
 	return count;
@@ -219,41 +225,91 @@ size_t get_infected_neighbors(Board* b, int x, int y) {
 * This function will compute the next state for any given cell at the current time
 * Parameters: x and y coordinates of target cell, and pointer to board itself
 * Output: The value of the state that will succeed this state
+*  TODO Should this function return a state or modify the state? probably return
 */
-void next_state(Board* b, int x, int y) {
-	Person* p = &b->current[x][y];
-	// Check current persons state to decide action
-	if (p->state == SUCEPTIBLE_CELL) {
-	    // If suceptible, count infected neighbors, decide if exposed
-		int infectedNeighbors = get_infected_neighbors(b, x, y);
-		//printf("Found %d infected neigbors\n", infectedNeighbors);
-		if (infectedNeighbors > 0) {
-			p->state = EXPOSED_CELL;
-		}
-	}
+cell_state next_state(Board* b, int x, int y) {
+    Person* current_person;
+    current_person = &b->current[x][y];
+    cell_state current_state = current_person->state;
+	//Check current persons state to decide action
+	if (current_state == SUCEPTIBLE_CELL) { // If suceptible, count infected neighbors, decide if exposed
+        int infectedNeighbors = get_infected_neighbors(b, x, y);
+        int infectChance = (random() % 20) * infectedNeighbors;
+        if (infectChance > 60) {
+            return EXPOSED_CELL;
+        } else {
+            return SUCEPTIBLE_CELL;
+        }
+    }
+    if (current_state == EXPOSED_CELL) { // Decide if moves to Infected
+        // TODO Need to decide on a incubation period for the infection to start
+        if (current_person->time_in_state >= 5) {
+            return INFECTED_CELL;
+        } else {
+        }
+    }
+    if (current_state == INFECTED_CELL) { // Decide if moves to W or D or R
+        //TODO Time will decide if => W, other will decide if D or R
+        if (current_person->time_in_state < 8) {
+            int change = random() % 100;
+            if (change < 10) {
+                int recovery = random() % 100;
+                if (recovery > 8) {
+                    return RECOVERED_CELL;
+                } else {
+                    return DEAD_CELL;
+                }
+            }
+            return INFECTED_CELL;
+        }
+        else{
+            return WITHOUT_CELL;
+        }
+    }
+    if (current_state == WITHOUT_CELL) { // Decide if moves to R or D
+
+    }
+    if (current_state == FREE_CELL) { // Decide if person will move into free cell
+
+    }
+    //If state is D, R, or B, will not change
+    return current_state;
 }
 
+/*
+ * Thread running function to perform the work for each tick on the cells
+ */
 void* rowTick(void* argp) {
     unsigned int num_rows = bc.height;
 #if NUM_THREADS
 	num_rows /= NUM_THREADS;
 #endif
-    unsigned int j = (*((size_t*)argp)) * num_rows;
+	unsigned int j = (*((size_t*)argp)) * num_rows;
 	unsigned int end = j + num_rows - 1;
-
 	for (; j < end; j++) {
 		for (size_t i = 0; i < bc.width; i++) {
-            next_state(&bc, i, j);
+		    cell_state current = bc.current[j][i].state;
+		    cell_state next = next_state(&bc, j, i);
+
+		    if (current != next) {
+		        bc.next[j][i].time_in_state = 0;
+		        bc.next[j][i].state = next;
+		    } else {
+                bc.next[j][i].time_in_state++;
+            }
 		}
 	}
 
 	return NULL;
 }
 
+/*
+ * Master function to handle all actions for each time unit
+ */
 void tick(Board* b) {
 	// Copy Board
 	for (size_t i = 0; i < b->height; i++) {
-		memcpy(b->previous[i], b->current[i], sizeof(b->current));
+		memcpy(b->next[i], b->current[i], sizeof(b->current));
 	}
 
 #if NUM_THREADS
@@ -266,7 +322,6 @@ void tick(Board* b) {
 	tmpI[0] = 0;
 
 #if NUM_THREADS
-	// Also need to keep track of current board without changes
 	for (size_t i = 1; i < NUM_THREADS; i++) {
 		tmpI[i] = i;
 		pthread_create(&(tid[i]), NULL, rowTick, (void*)&tmpI[i]);
@@ -287,8 +342,8 @@ void tick(Board* b) {
 	free(tmpI);
 
 	Person** tmp = b->current;
-	b->current = b->previous;
-	b->previous = tmp;
+	b->current = b->next;
+	b->next = tmp;
 }
 
 
@@ -298,7 +353,7 @@ int main() {
 	// Using built in random for now, may change out later
 	srandom(time(NULL));
 
-	InitBoard(&bc, GRID_SIZE, GRID_SIZE);
+	InitBoard(&bc, GRID_SIZE+2, GRID_SIZE+2);
 
     infect_people(&bc);
 
@@ -314,16 +369,21 @@ int main() {
     PrintBoard(&bc);
 #endif
 
-    for (size_t i = 0; i < MAX_TICKS; i++) {
-        // Perform tick
-        tick(&bc);
-    }
+	// Begin actual experiment
+	for (size_t i = 0; i < 30; i++) {
+	    tick(&bc);
+        infected = count_people(&bc, INFECTED_CELL) + count_people(&bc, WITHOUT_CELL);
+        printf("Number of people infected: %d out of %d\n", infected, people);
+	}
 
-    people = count_people(&bc, SUCEPTIBLE_CELL);
-    printf("Number of people suceptible: %d out of %d\n", people, GRID_SIZE*GRID_SIZE);
+    int infect_no_spread = count_people(&bc, WITHOUT_CELL);
+    printf("Number of people in W: %d out of %d\n", infect_no_spread, people);
 
-    infected = count_people(&bc, INFECTED_CELL);
-    printf("Number of people infected: %d out of %d\n", infected, people);
+    int recovered = count_people(&bc, RECOVERED_CELL);
+    printf("Number of people recovered: %d out of %d\n", recovered, people);
+
+    int dead = count_people(&bc, DEAD_CELL);
+    printf("Number of people dead: %d out of %d\n", dead, people);
 
 #ifdef DEBUG
     PrintBoard(&bc);
