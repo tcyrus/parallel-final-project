@@ -13,7 +13,6 @@
 #include <errno.h>
 #include <math.h>
 #include <stdbool.h>
-#include <mpi.h>
 #include <pthread.h>
 #include <time.h>
 
@@ -48,7 +47,7 @@
 	D - Dead.
 */
 typedef enum { B, F, S, E, I, R, D, W } state;
-const char * stateNames[] = { "B", "F", "S", "E", "I", "R", "D", "W" }; // In case we actually want to print out the letters instead of numbers
+const char stateNames[] = { 'B', 'F', 'S', 'E', 'I', 'R', 'D', 'W' }; // In case we actually want to print out the letters instead of numbers
 
 
 /***************************************************************************/
@@ -86,15 +85,14 @@ Board bc;
 /* Function Decs ***********************************************************/
 /***************************************************************************/
 
-
-void Init_person(Person * person) {
+void InitPerson(Person* person) {
 	person->age = (rand() % 89) + 1;
 	person->time_in_state = 0;
 }
 
 // Handles board initialization
 // BoardChunk is clear on initialization
-void Init_board(Board* b, size_t width, size_t height) {
+void InitBoard(Board* b, size_t width, size_t height) {
 	b->width = width;
 	b->height = height;
 	b->current = calloc(height, sizeof(Person*));
@@ -113,8 +111,7 @@ void Init_board(Board* b, size_t width, size_t height) {
 			
 			if (chance > POPULATION_RATE) {
 				newPerson->my_state = S;
-			}
-			else {
+			} else {
 				newPerson->my_state = F;
 			}
 			b->current[i][j] = *newPerson;
@@ -123,7 +120,7 @@ void Init_board(Board* b, size_t width, size_t height) {
 	}
 }
 
-void Destroy_board(Board* b) {
+void DestroyBoard(Board* b) {
 	for (size_t i = 0; i < b->height; i++) {
 		free(b->current[i]);
 		free(b->previous[i]);
@@ -133,10 +130,10 @@ void Destroy_board(Board* b) {
 }
 
 // Prints the board... Debug purposes 
-void print_board(Board* b) {
+void PrintBoard(Board* b) {
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
-			printf(" %s ", stateNames[b->current[i][j].my_state]);
+			printf(" %c ", stateNames[b->current[i][j].my_state]);
 		}
 		putchar('\n');
 	}
@@ -146,8 +143,8 @@ void print_board(Board* b) {
  Returns the number of people in a given state
  Takes a value from enum state as second argument
 */
-int count_people(Board* b, state s) {
-	int count = 0;
+unsigned int count_people(Board* b, state s) {
+	unsigned int count = 0;
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
 			if (b->current[i][j].my_state == s)
@@ -170,7 +167,7 @@ void infect_people(Board* b) {
 				if (infected < INFECTION_RATE) {
 					b->current[i][j].my_state = I;
 				}
-			}	
+			}
 		}
 	}
 }
@@ -271,9 +268,6 @@ void tick(Board* b) {
 	}
 #endif
 
-	MPI_Wait(&sendUp, &mpi_stat);
-	MPI_Wait(&sendDown, &mpi_stat);
-
 	if (pthread_self() == parent) {
 		rowTick((void*)&tmpI[0]);
 	}
@@ -302,18 +296,18 @@ int main(int argc, char *argv[]) {
 	// Using built in random for now, may change out later
 	srand(time(NULL));
 
-	Init_board(&bc, GRID_SIZE, GRID_SIZE);
-	print_board(&bc);
+	InitBoard(&bc, GRID_SIZE, GRID_SIZE);
+	PrintBoard(&bc);
 
-	int people = count_people(&bc, S);
+	unsigned int people = count_people(&bc, S);
 	printf("Number of people: %d out of %d\n", people, GRID_SIZE*GRID_SIZE);
 
 	infect_people(&bc);
 
-	int infected = count_people(&bc, I);
+	unsigned int infected = count_people(&bc, I);
 	printf("Number of people infected: %d out of %d\n", infected, people);
 
-	print_board(&bc);
+	PrintBoard(&bc);
 
 	g_end_cycles = (unsigned long long)GetTimeBase();
 	g_time_in_secs = g_end_cycles - g_start_cycles;
