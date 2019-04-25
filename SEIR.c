@@ -195,7 +195,7 @@ int get_infected_neighbors(Board* b, int x, int y) {
 
 	// We only care about infected cells in state I,
 	// infected cells in state W are non-infectious
-	// TODO May change depending on if we keep border or not
+	// TODO May change depending on if we keep border or not, probably should add the safe edge guarding regardless
 	if (b->current[left][y].my_state == I)
 		count++;
 	if (b->current[left][up].my_state == I)
