@@ -24,9 +24,7 @@
 #else
 #define GetTimeBase MPI_Wtime
 /*
-double GetTimeBase() {
-	return (double)clock() / CLOCKS_PER_SEC;
-}
+double GetTimeBase() { return (double)clock() / CLOCKS_PER_SEC; }
 */
 #define PROC_FREQ 1.0
 #endif
@@ -37,6 +35,7 @@ double GetTimeBase() {
 
 #define GRID_SIZE 30
 #define NUM_THREADS 4
+#define NUM_TICKS 30
 #define MAX_TICKS 256 // May look into making ticks represent hours, up to a number of days?
 #define POPULATION_RATE 50 // Out of 100
 #define INFECTION_RATE 10 // Out of 100
@@ -205,8 +204,8 @@ void infect_people(Board* b) {
 size_t get_infected_neighbors(Board* b, int x, int y) {
 	// We will not be using wrap around for this version
 	size_t count = 0;
-    int left = (x == 0) ? (b->width - 1) : (x - 1),
-            right = (x == b->width - 1) ? 0 : (x + 1);
+    int left = (x == 0) ? (b->width - 1) : (x - 1);
+    int right = (x == b->width - 1) ? 0 : (x + 1);
 
 	// We only care about infected cells in state I,
 	// infected cells in state W are non-infectious
@@ -242,7 +241,7 @@ cell_state next_state(Board* b, int x, int y) {
 	switch (current_person->state) {
 	    case SUCEPTIBLE_CELL: ;
             // If suceptible, count infected neighbors, decide if exposed
-            int infectedNeighbors = get_infected_neighbors(b, x, y);
+            size_t infectedNeighbors = get_infected_neighbors(b, x, y);
             int infectChance = (random() % 20) * infectedNeighbors;
             return (infectChance > 60) ? EXPOSED_CELL : SUCEPTIBLE_CELL;
         case EXPOSED_CELL:
@@ -364,36 +363,66 @@ int main(int argc, char *argv[]) {
 
 	InitBoard(&bc, GRID_SIZE+2, GRID_SIZE+2);
 
-    infect_people(&bc);
 
     unsigned int people, infected;
 
     people = count_people(&bc, SUCEPTIBLE_CELL);
+
+    infect_people(&bc);
+
     infected = count_people(&bc, INFECTED_CELL);
 
-#ifdef DEBUG
     printf("Number of people suceptible: %d out of %d\n", people, GRID_SIZE*GRID_SIZE);
-
 	printf("Number of people infected: %d out of %d\n", infected, people);
 
+#ifdef DEBUG
     PrintBoard(&bc);
 #endif
 
-	// Begin actual experiment
-	for (size_t i = 0; i < 30; i++) {
+    unsigned long long* infectedCount = (unsigned long long*)calloc(NUM_TICKS, sizeof(unsigned long long));
+
+    // Begin actual experiment
+	for (size_t i = 0; i < NUM_TICKS; i++) {
 	    tick(&bc);
-        infected = count_people(&bc, INFECTED_CELL) + count_people(&bc, WITHOUT_CELL);
-        printf("Number of people infected: %d out of %d\n", infected, people);
+        infectedCount[i] = count_people(&bc, INFECTED_CELL) + count_people(&bc, WITHOUT_CELL);
+        MPI_Barrier(MPI_COMM_WORLD);
 	}
 
-    int infect_no_spread = count_people(&bc, WITHOUT_CELL);
-    printf("Number of people in W: %d out of %d\n", infect_no_spread, people);
+    unsigned long long global_sum = 0;
+    for (size_t i = 0; i < NUM_TICKS; i++) {
+        global_sum = 0;
 
-    int recovered = count_people(&bc, RECOVERED_CELL);
-    printf("Number of people recovered: %d out of %d\n", recovered, people);
+        MPI_Reduce((void*)&(infectedCount[i]), (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 
-    int dead = count_people(&bc, DEAD_CELL);
-    printf("Number of people dead: %d out of %d\n", dead, people);
+        if (world_rank == 0) {
+            infectedCount[i] = global_sum;
+            printf("Number of people infected: %lld out of %d\n", infectedCount[i], people);
+        }
+    }
+
+    global_sum = 0;
+    unsigned long long infect_no_spread = count_people(&bc, WITHOUT_CELL);
+    MPI_Reduce((void*)&infect_no_spread, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        infect_no_spread = global_sum;
+        printf("Number of people infected without spreading: %lld out of %d\n", infect_no_spread, people);
+    }
+
+    global_sum = 0;
+    unsigned long long recovered = count_people(&bc, RECOVERED_CELL);
+    MPI_Reduce((void*)&recovered, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        recovered = global_sum;
+        printf("Number of people recovered: %lld out of %d\n", recovered, people);
+    }
+
+    global_sum = 0;
+    unsigned long long dead = count_people(&bc, RECOVERED_CELL);
+    MPI_Reduce((void*)&dead, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        dead = global_sum;
+        printf("Number of people dead: %lld out of %d\n", dead, people);
+    }
 
 #ifdef DEBUG
     PrintBoard(&bc);
@@ -403,7 +432,7 @@ int main(int argc, char *argv[]) {
 
     if (world_rank == 0) {
         g_end_cycles = (unsigned long long) GetTimeBase();
-        g_time_in_secs = g_end_cycles - g_start_cycles;
+        g_time_in_secs = (double)(g_end_cycles - g_start_cycles) / g_processor_frequency;
         printf("Time = %f\n", g_time_in_secs);
     }
 
