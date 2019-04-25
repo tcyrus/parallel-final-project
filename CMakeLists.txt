@@ -9,7 +9,7 @@ set(CMAKE_C_COMPILER gcc)
 
 set(CMAKE_C_STANDARD 11)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -O5")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread -Wall -Wextra -O5")
 
 add_executable(SEIR SEIR.c)
 #add_executable(SEIR.xl SEIR.c)
