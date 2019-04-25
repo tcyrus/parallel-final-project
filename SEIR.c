@@ -13,16 +13,21 @@
 #include <errno.h>
 #include <math.h>
 #include <stdbool.h>
-#include <pthread.h>
 #include <time.h>
+
+#include <mpi.h>
+#include <pthread.h>
 
 #ifdef __bgq__
 #include <hwi/include/bqc/A2_inlines.h>
 #define PROC_FREQ 1600000000.0
 #else
+#define GetTimeBase MPI_Wtime
+/*
 double GetTimeBase() {
 	return (double)clock() / CLOCKS_PER_SEC;
 }
+*/
 #define PROC_FREQ 1.0
 #endif
 
@@ -68,6 +73,9 @@ const char stateNames[] = { 'B', 'F', 'S', 'E', 'I', 'R', 'D', 'W' };
 /***************************************************************************/
 /* Global Vars *************************************************************/
 /***************************************************************************/
+
+int world_size = -1;
+int world_rank = -1;
 
 double g_time_in_secs = 0;
 double io_time_in_secs = 0;
@@ -174,7 +182,7 @@ unsigned int count_people(Board* b, cell_state cell) {
 * This is only to be used as an initialization function before beginning actual testing
 */
 void infect_people(Board* b) {
-	//We will infect a certain percent of the population as a starting point
+	// We will infect a certain percent of the population as a starting point
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
 			if (b->current[i][j].state != SUCEPTIBLE_CELL) {
@@ -194,28 +202,28 @@ void infect_people(Board* b) {
 * We will make the border of the world be a border, so this function will 
 * never recieve a cell on the edge of the grid
 */
-int get_infected_neighbors(Board* b, int x, int y) {
+size_t get_infected_neighbors(Board* b, int x, int y) {
 	// We will not be using wrap around for this version
 	size_t count = 0;
-	int left = x - 1,
-		right = x + 1,
-		up = y + 1,
-		down = y - 1;
+    int left = (x == 0) ? (b->width - 1) : (x - 1),
+            right = (x == b->width - 1) ? 0 : (x + 1);
 
 	// We only care about infected cells in state I,
 	// infected cells in state W are non-infectious
-    count += (b->current[x][up].state == INFECTED_CELL);
-    count += (b->current[x][down].state == INFECTED_CELL);
-	if (left >= 0) {
-        count += (b->current[left][y].state == INFECTED_CELL);
-        count += (y == b->height - 1) && (b->current[left][up].state == INFECTED_CELL);
-        count += (down >= 0) && (b->current[left][down].state == INFECTED_CELL);
+    if (y != 0) {
+        count += (b->current[y-1][right].state == INFECTED_CELL); // down and right
+        count += (b->current[y-1][x].state == INFECTED_CELL); // just down
+        count += (b->current[y-1][left].state == INFECTED_CELL); // down and left
     }
-    if (right < b->width) {
-        count += (b->current[right][y].state == INFECTED_CELL);
-        count += (y == b->height - 1) && (b->current[right][up].state == INFECTED_CELL);
-        count += (down >= 0) && (b->current[right][down].state == INFECTED_CELL);
+
+    if (y != b->height - 1) {
+        count += (b->current[y+1][x].state == INFECTED_CELL); // Just up
+        count += (b->current[y+1][left].state == INFECTED_CELL); // UP and left
+        count += (b->current[y+1][right].state == INFECTED_CELL); // UP and right
     }
+
+    count += (b->current[y][right].state == INFECTED_CELL); // just right
+    count += (b->current[y][left].state == INFECTED_CELL); // just left
 
 	return count;
 
@@ -246,7 +254,7 @@ cell_state next_state(Board* b, int x, int y) {
             break;
 	    case INFECTED_CELL:
             // Decide if moves to W or D or R
-            //TODO Time will decide if => W, other will decide if D or R
+            // TODO Time will decide if => W, other will decide if D or R
             if (current_person->time_in_state < 8) {
                 int change = random() % 100;
                 if (change < 10) {
@@ -284,10 +292,9 @@ void* rowTick(void* argp) {
 	unsigned int end = j + num_rows - 1;
 	for (; j < end; j++) {
 		for (size_t i = 0; i < bc.width; i++) {
-		    cell_state current = bc.current[j][i].state;
 		    cell_state next = next_state(&bc, j, i);
 
-		    if (current != next) {
+		    if (bc.current[j][i].state != next) {
 		        bc.next[j][i].time_in_state = 0;
 		        bc.next[j][i].state = next;
 		    } else {
@@ -343,8 +350,14 @@ void tick(Board* b) {
 }
 
 
-int main() {
-	g_start_cycles = (unsigned long long)GetTimeBase();
+int main(int argc, char *argv[]) {
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
+    if (world_rank == 0) {
+        g_start_cycles = (unsigned long long)GetTimeBase();
+    }
 
 	// Using built in random for now, may change out later
 	srandom(time(NULL));
@@ -356,12 +369,13 @@ int main() {
     unsigned int people, infected;
 
     people = count_people(&bc, SUCEPTIBLE_CELL);
-	printf("Number of people suceptible: %d out of %d\n", people, GRID_SIZE*GRID_SIZE);
-
-	infected = count_people(&bc, INFECTED_CELL);
-	printf("Number of people infected: %d out of %d\n", infected, people);
+    infected = count_people(&bc, INFECTED_CELL);
 
 #ifdef DEBUG
+    printf("Number of people suceptible: %d out of %d\n", people, GRID_SIZE*GRID_SIZE);
+
+	printf("Number of people infected: %d out of %d\n", infected, people);
+
     PrintBoard(&bc);
 #endif
 
@@ -387,9 +401,11 @@ int main() {
 
     DestroyBoard(&bc);
 
-    g_end_cycles = (unsigned long long)GetTimeBase();
-	g_time_in_secs = g_end_cycles - g_start_cycles;
-	printf("Time = %f\n", g_time_in_secs);
+    if (world_rank == 0) {
+        g_end_cycles = (unsigned long long) GetTimeBase();
+        g_time_in_secs = g_end_cycles - g_start_cycles;
+        printf("Time = %f\n", g_time_in_secs);
+    }
 
 	return 0;
 }
