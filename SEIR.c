@@ -20,7 +20,9 @@
 #include <hwi/include/bqc/A2_inlines.h>
 #define PROC_FREQ 1600000000.0
 #else
-#define GetTimeBase MPI_Wtime
+double GetTimeBase() {
+	return (double)clock() / CLOCKS_PER_SEC;
+}
 #define PROC_FREQ 1.0
 #endif
 
@@ -107,7 +109,7 @@ void InitBoard(Board* b, size_t width, size_t height) {
 			int chance = rand() % 100;
 			Person *newPerson;
 			newPerson = malloc(sizeof(Person));
-			Init_person(newPerson);
+			InitPerson(newPerson);
 			
 			if (chance > POPULATION_RATE) {
 				newPerson->my_state = S;
