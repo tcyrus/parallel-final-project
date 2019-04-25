@@ -226,9 +226,7 @@ void next_state(Board* b, int x, int y) {
 	if (p->state == SUCEPTIBLE_CELL) {
 	    // If suceptible, count infected neighbors, decide if exposed
 		int infectedNeighbors = get_infected_neighbors(b, x, y);
-#ifdef DEBUG
-		printf("Found %d infected neigbors\n", infectedNeighbors);
-#endif
+		//printf("Found %d infected neigbors\n", infectedNeighbors);
 		if (infectedNeighbors > 0) {
 			p->state = EXPOSED_CELL;
 		}
@@ -302,16 +300,14 @@ int main() {
 
 	InitBoard(&bc, GRID_SIZE, GRID_SIZE);
 
-#ifdef DEBUG
-	PrintBoard(&bc);
-#endif
+    infect_people(&bc);
 
-	unsigned int people = count_people(&bc, SUCEPTIBLE_CELL);
+    unsigned int people, infected;
+
+    people = count_people(&bc, SUCEPTIBLE_CELL);
 	printf("Number of people suceptible: %d out of %d\n", people, GRID_SIZE*GRID_SIZE);
 
-	infect_people(&bc);
-
-	unsigned int infected = count_people(&bc, INFECTED_CELL);
+	infected = count_people(&bc, INFECTED_CELL);
 	printf("Number of people infected: %d out of %d\n", infected, people);
 
 #ifdef DEBUG
@@ -322,6 +318,12 @@ int main() {
         // Perform tick
         tick(&bc);
     }
+
+    people = count_people(&bc, SUCEPTIBLE_CELL);
+    printf("Number of people suceptible: %d out of %d\n", people, GRID_SIZE*GRID_SIZE);
+
+    infected = count_people(&bc, INFECTED_CELL);
+    printf("Number of people infected: %d out of %d\n", infected, people);
 
 #ifdef DEBUG
     PrintBoard(&bc);
