@@ -31,7 +31,7 @@ double GetTimeBase() {
 /***************************************************************************/
 
 #define GRID_SIZE 30
-#define NUM_THREADS 0
+#define NUM_THREADS 2
 #define MAX_TICKS 256 // May look into making ticks represent hours, up to a number of days?
 #define POPULATION_RATE 50 // Out of 100
 #define INFECTION_RATE 10 // Out of 100
@@ -48,28 +48,41 @@ double GetTimeBase() {
 	W - Infected without spreading
 	D - Dead.
 */
-typedef enum { B, F, S, E, I, R, D, W } state;
-const char stateNames[] = { 'B', 'F', 'S', 'E', 'I', 'R', 'D', 'W' }; // In case we actually want to print out the letters instead of numbers
+typedef enum {
+    BOARDER_CELL,
+    FREE_CELL,
+    SUCEPTIBLE_CELL,
+    EXPOSED_CELL,
+    INFECTED_CELL,
+    RECOVERED_CELL,
+    DEAD_CELL,
+    WITHOUT_CELL
+} cell_state;
+
+#ifdef DEBUG
+// In case we actually want to print out the letters instead of numbers
+const char stateNames[] = { 'B', 'F', 'S', 'E', 'I', 'R', 'D', 'W' };
+#endif
 
 
 /***************************************************************************/
 /* Global Vars *************************************************************/
 /***************************************************************************/
 
-double g_time_in_secs = 0,
-io_time_in_secs = 0;
+double g_time_in_secs = 0;
+double io_time_in_secs = 0;
 
-unsigned long long g_start_cycles = 0,
-g_end_cycles = 0,
-io_start_cycles = 0,
-io_end_cycles = 0;
+unsigned long long g_start_cycles = 0;
+unsigned long long g_end_cycles = 0;
+unsigned long long io_start_cycles = 0;
+unsigned long long io_end_cycles = 0;
 
 const double g_processor_frequency = PROC_FREQ;
 const double threshold = 0.75;
 
 typedef struct {
 	unsigned int time_in_state;
-	state my_state;
+    cell_state state;
 	unsigned int age;
 } Person;
 
@@ -88,7 +101,7 @@ Board bc;
 /***************************************************************************/
 
 void InitPerson(Person* person) {
-	person->age = (rand() % 89) + 1;
+	person->age = (random() % 89) + 1;
 	person->time_in_state = 0;
 }
 
@@ -106,18 +119,10 @@ void InitBoard(Board* b, size_t width, size_t height) {
 
 		for (size_t j = 0; j < width; j++) {
 			//Init based on population of board
-			int chance = rand() % 100;
-			Person *newPerson;
-			newPerson = malloc(sizeof(Person));
-			InitPerson(newPerson);
-			
-			if (chance > POPULATION_RATE) {
-				newPerson->my_state = S;
-			} else {
-				newPerson->my_state = F;
-			}
-			b->current[i][j] = *newPerson;
+			int chance = random() % 100;
+			InitPerson(&(b->current[i][j]));
 
+            b->current[i][j].state = (chance > POPULATION_RATE) ? SUCEPTIBLE_CELL : FREE_CELL;
 		}
 	}
 }
@@ -131,25 +136,27 @@ void DestroyBoard(Board* b) {
 	free(b->previous);
 }
 
+#ifdef DEBUG
 // Prints the board... Debug purposes 
 void PrintBoard(Board* b) {
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
-			printf(" %c ", stateNames[b->current[i][j].my_state]);
+			printf(" %c ", stateNames[b->current[i][j].state]);
 		}
 		putchar('\n');
 	}
 }
+#endif
 
 /*
  Returns the number of people in a given state
  Takes a value from enum state as second argument
 */
-unsigned int count_people(Board* b, state s) {
+unsigned int count_people(Board* b, cell_state cell) {
 	unsigned int count = 0;
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
-			if (b->current[i][j].my_state == s)
+			if (b->current[i][j].state == cell)
 				count++;
 		}
 	}
@@ -164,10 +171,10 @@ void infect_people(Board* b) {
 	//We will infect a certain percent of the population as a starting point
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
-			if (b->current[i][j].my_state != S) {
-				int infected = rand() % 100;
+			if (b->previous[i][j].state != SUCEPTIBLE_CELL) {
+				int infected = random() % 100;
 				if (infected < INFECTION_RATE) {
-					b->current[i][j].my_state = I;
+					b->current[i][j].state = INFECTED_CELL;
 				}
 			}
 		}
@@ -191,22 +198,18 @@ size_t get_infected_neighbors(Board* b, int x, int y) {
 
 	// We only care about infected cells in state I,
 	// infected cells in state W are non-infectious
-	if (b->current[left][y].my_state == I)
-		count++;
-	if (b->current[left][up].my_state == I)
-		count++;
-	if (b->current[left][down].my_state == I)
-		count++;
-	if (b->current[x][up].my_state == I)
-		count++;
-	if (b->current[x][down].my_state == I)
-		count++;
-	if (b->current[right][y].my_state == I)
-		count++;
-	if (b->current[right][up].my_state == I)
-		count++;
-	if (b->current[right][down].my_state == I)
-		count++;
+    count += (b->previous[x][up].state == INFECTED_CELL);
+    count += (b->previous[x][down].state == INFECTED_CELL);
+	if (left >= 0) {
+        count += (b->previous[left][y].state == INFECTED_CELL);
+        count += (up < b->height) && (b->previous[left][up].state == INFECTED_CELL);
+        count += (down >= 0) && (b->previous[left][down].state == INFECTED_CELL);
+    }
+    if (right < b->width) {
+        count += (b->previous[right][y].state == INFECTED_CELL);
+        count += (up < b->height) && (b->previous[right][up].state == INFECTED_CELL);
+        count += (down >= 0) && (b->previous[right][down].state == INFECTED_CELL);
+    }
 
 	return count;
 
@@ -216,31 +219,33 @@ size_t get_infected_neighbors(Board* b, int x, int y) {
 * This function will compute the next state for any given cell at the current time
 * Parameters: x and y coordinates of target cell, and pointer to board itself
 * Output: The value of the state that will succeed this state
-* 
 */
 void next_state(Board* b, int x, int y) {
-	Person* current_person = &b->current[x][y];
-	//Check current persons state to decide action
-	if (current_person->my_state == S) { // If suceptible, count infected neighbors, decide if exposed
+	Person* p = &b->current[x][y];
+	// Check current persons state to decide action
+	if (p->state == SUCEPTIBLE_CELL) {
+	    // If suceptible, count infected neighbors, decide if exposed
 		int infectedNeighbors = get_infected_neighbors(b, x, y);
+#ifdef DEBUG
 		printf("Found %d infected neigbors\n", infectedNeighbors);
+#endif
 		if (infectedNeighbors > 0) {
-			current_person->my_state = E;
+			p->state = EXPOSED_CELL;
 		}
 	}
 }
 
 void* rowTick(void* argp) {
-	size_t num_rows = bc.height;
+    unsigned int num_rows = bc.height;
 #if NUM_THREADS
 	num_rows /= NUM_THREADS;
 #endif
-	size_t j = (*((size_t*)argp)) * num_rows;
-	int end = j + num_rows - 1;
+    unsigned int j = (*((size_t*)argp)) * num_rows;
+	unsigned int end = j + num_rows - 1;
 
 	for (; j < end; j++) {
 		for (size_t i = 0; i < bc.width; i++) {
-
+            next_state(&bc, i, j);
 		}
 	}
 
@@ -288,30 +293,43 @@ void tick(Board* b) {
 	b->previous = tmp;
 }
 
-/***************************************************************************/
-/* Function: Main **********************************************************/
-/***************************************************************************/
 
-int main(int argc, char *argv[]) {
+int main() {
 	g_start_cycles = (unsigned long long)GetTimeBase();
 
 	// Using built in random for now, may change out later
-	srand(time(NULL));
+	srandom(time(NULL));
 
 	InitBoard(&bc, GRID_SIZE, GRID_SIZE);
-	PrintBoard(&bc);
 
-	unsigned int people = count_people(&bc, S);
-	printf("Number of people: %d out of %d\n", people, GRID_SIZE*GRID_SIZE);
+#ifdef DEBUG
+	PrintBoard(&bc);
+#endif
+
+	unsigned int people = count_people(&bc, SUCEPTIBLE_CELL);
+	printf("Number of people suceptible: %d out of %d\n", people, GRID_SIZE*GRID_SIZE);
 
 	infect_people(&bc);
 
-	unsigned int infected = count_people(&bc, I);
+	unsigned int infected = count_people(&bc, INFECTED_CELL);
 	printf("Number of people infected: %d out of %d\n", infected, people);
 
-	PrintBoard(&bc);
+#ifdef DEBUG
+    PrintBoard(&bc);
+#endif
 
-	g_end_cycles = (unsigned long long)GetTimeBase();
+    for (size_t i = 0; i < MAX_TICKS; i++) {
+        // Perform tick
+        tick(&bc);
+    }
+
+#ifdef DEBUG
+    PrintBoard(&bc);
+#endif
+
+    DestroyBoard(&bc);
+
+    g_end_cycles = (unsigned long long)GetTimeBase();
 	g_time_in_secs = g_end_cycles - g_start_cycles;
 	printf("Time = %f\n", g_time_in_secs);
 
