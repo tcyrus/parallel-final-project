@@ -129,9 +129,9 @@ void InitBoard(Board* b, size_t width, size_t height) {
 			int chance = random() % 100;
 			InitPerson(&(b->current[i][j]));
 
-            if (i == 0 || j == 0 || i == height-1 || j == width-1) {
+            /*if (i == 0 || j == 0 || i == height-1 || j == width-1) {
                 b->current[i][j].state = BOARDER_CELL;
-            } else if (chance > POPULATION_RATE) {
+            } else */if (chance > POPULATION_RATE) {
 				b->current[i][j].state = SUCEPTIBLE_CELL;
 			} else {
 				b->current[i][j].state = FREE_CELL;
@@ -201,7 +201,7 @@ void infect_people(Board* b) {
 * We will make the border of the world be a border, so this function will 
 * never recieve a cell on the edge of the grid
 */
-size_t get_infected_neighbors(Board* b, int x, int y) {
+size_t get_infected_neighbors(Board* b, unsigned int x, unsigned int y) {
 	// We will not be using wrap around for this version
 	size_t count = 0;
     int left = (x == 0) ? (b->width - 1) : (x - 1);
@@ -234,16 +234,17 @@ size_t get_infected_neighbors(Board* b, int x, int y) {
 * Output: The value of the state that will succeed this state
 *  TODO Should this function return a state or modify the state? probably return
 */
-cell_state next_state(Board* b, int x, int y) {
+cell_state next_state(Board* b, unsigned int x, unsigned int y) {
     Person* current_person = &(b->current[x][y]);
 
 	// Check current persons state to decide action
 	switch (current_person->state) {
-	    case SUCEPTIBLE_CELL: ;
+	    case SUCEPTIBLE_CELL: {
             // If suceptible, count infected neighbors, decide if exposed
             size_t infectedNeighbors = get_infected_neighbors(b, x, y);
             int infectChance = (random() % 20) * infectedNeighbors;
             return (infectChance > 60) ? EXPOSED_CELL : SUCEPTIBLE_CELL;
+	    }
         case EXPOSED_CELL:
             // Decide if moves to Infected
             // TODO Need to decide on a incubation period for the infection to start
@@ -361,8 +362,8 @@ int main(int argc, char *argv[]) {
 	// Using built in random for now, may change out later
 	srandom(time(NULL));
 
-	InitBoard(&bc, GRID_SIZE+2, GRID_SIZE+2);
-
+    size_t chunk = GRID_SIZE / world_size;
+	InitBoard(&bc, GRID_SIZE, chunk);
 
     unsigned int people, infected;
 
