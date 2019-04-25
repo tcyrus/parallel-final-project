@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(SEIR C)
 
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
 #find_package(MPI REQUIRED)
 
 set(CMAKE_C_COMPILER gcc)
@@ -16,4 +18,5 @@ add_executable(SEIR SEIR.c)
 
 #include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 
+target_link_libraries(SEIR Threads::Threads)
 #target_link_libraries(SEIR ${MPI_C_LIBRARIES})
