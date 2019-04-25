@@ -228,52 +228,48 @@ int get_infected_neighbors(Board* b, int x, int y) {
 *  TODO Should this function return a state or modify the state? probably return
 */
 cell_state next_state(Board* b, int x, int y) {
-    Person* current_person;
-    current_person = &b->current[x][y];
-    cell_state current_state = current_person->state;
-	//Check current persons state to decide action
-	if (current_state == SUCEPTIBLE_CELL) { // If suceptible, count infected neighbors, decide if exposed
-        int infectedNeighbors = get_infected_neighbors(b, x, y);
-        int infectChance = (random() % 20) * infectedNeighbors;
-        if (infectChance > 60) {
-            return EXPOSED_CELL;
-        } else {
-            return SUCEPTIBLE_CELL;
-        }
-    }
-    if (current_state == EXPOSED_CELL) { // Decide if moves to Infected
-        // TODO Need to decide on a incubation period for the infection to start
-        if (current_person->time_in_state >= 5) {
-            return INFECTED_CELL;
-        } else {
-        }
-    }
-    if (current_state == INFECTED_CELL) { // Decide if moves to W or D or R
-        //TODO Time will decide if => W, other will decide if D or R
-        if (current_person->time_in_state < 8) {
-            int change = random() % 100;
-            if (change < 10) {
-                int recovery = random() % 100;
-                if (recovery > 8) {
-                    return RECOVERED_CELL;
-                } else {
-                    return DEAD_CELL;
+    Person* current_person = &(b->current[x][y]);
+
+	// Check current persons state to decide action
+	switch (current_person->state) {
+	    case SUCEPTIBLE_CELL: ;
+            // If suceptible, count infected neighbors, decide if exposed
+            int infectedNeighbors = get_infected_neighbors(b, x, y);
+            int infectChance = (random() % 20) * infectedNeighbors;
+            return (infectChance > 60) ? EXPOSED_CELL : SUCEPTIBLE_CELL;
+        case EXPOSED_CELL:
+            // Decide if moves to Infected
+            // TODO Need to decide on a incubation period for the infection to start
+            if (current_person->time_in_state >= 5) {
+                return INFECTED_CELL;
+            } else {}
+            break;
+	    case INFECTED_CELL:
+            // Decide if moves to W or D or R
+            //TODO Time will decide if => W, other will decide if D or R
+            if (current_person->time_in_state < 8) {
+                int change = random() % 100;
+                if (change < 10) {
+                    int recovery = random() % 100;
+                    return (recovery > 8) ? RECOVERED_CELL : DEAD_CELL;
                 }
+
+                return INFECTED_CELL;
             }
-            return INFECTED_CELL;
-        }
-        else{
+
             return WITHOUT_CELL;
-        }
+        case WITHOUT_CELL:
+            // Decide if moves to R or D
+            break;
+	    case FREE_CELL:
+	        // Decide if person will move into free cell
+	        break;
+	    default:
+	        break;
     }
-    if (current_state == WITHOUT_CELL) { // Decide if moves to R or D
 
-    }
-    if (current_state == FREE_CELL) { // Decide if person will move into free cell
-
-    }
-    //If state is D, R, or B, will not change
-    return current_state;
+    // If state is D, R, or B, will not change
+    return current_person->state;
 }
 
 /*
