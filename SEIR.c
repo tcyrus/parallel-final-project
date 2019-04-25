@@ -283,7 +283,7 @@ void tick(Board* b) {
 #endif
 	free(tmpI);
 
-	int** tmp = b->current;
+	Person** tmp = b->current;
 	b->current = b->previous;
 	b->previous = tmp;
 }
