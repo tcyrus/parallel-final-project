@@ -18,6 +18,10 @@
 #include <mpi.h>
 #include <pthread.h>
 
+#include "cell_state.h"
+#include "person.h"
+#include "board.h"
+
 #ifdef __bgq__
 #include <hwi/include/bqc/A2_inlines.h>
 #define PROC_FREQ 1600000000.0
@@ -39,32 +43,8 @@
 #define INFECTION_RATE 10 // Out of 100
 #define OUT_FILE "thresh.txt"
 
-/*
-	States include: SUBJECT TO CHANGE
-	B - Border of automata
-	F - Free Cell, no person, empty
-	S - Suceptible to flu
-	E - Exposed, incubation period, but not spread
-	I - Infected, can spread flu
-	R - Recovered, no longer spreads
-	W - Infected without spreading
-	D - Dead.
-*/
-typedef enum {
-    BOARDER_CELL,
-    FREE_CELL,
-    SUCEPTIBLE_CELL,
-    EXPOSED_CELL,
-    INFECTED_CELL,
-    RECOVERED_CELL,
-    DEAD_CELL,
-    WITHOUT_CELL
-} cell_state;
-
-#ifdef DEBUG
-// In case we actually want to print out the letters instead of numbers
-const char stateNames[] = { 'B', 'F', 'S', 'E', 'I', 'R', 'D', 'W' };
-#endif
+Person* recv_above;
+Person* recv_below;
 
 
 /***************************************************************************/
@@ -79,18 +59,16 @@ double g_time_in_secs = 0;
 unsigned long long g_start_cycles = 0;
 unsigned long long g_end_cycles = 0;
 
-typedef struct {
-	unsigned int time_in_state;
-    cell_state state;
-	unsigned int age;
-} Person;
+Person* send_above;
+Person* send_below;
+Person* recv_above;
+Person* recv_below;
 
-typedef struct {
-	size_t width;
-	size_t height;
-	Person** current;
-	Person** next;
-} Board;
+MPI_Status mpi_stat;
+MPI_Request recieveUp,
+            recieveDown,
+            sendUp,
+            sendDown;
 
 // May be a way to store the updated values before we finish going through all values
 Board bc;
@@ -98,6 +76,18 @@ Board bc;
 /***************************************************************************/
 /* Function Decs ***********************************************************/
 /***************************************************************************/
+
+void Send_Recv_Init(size_t width) {
+    // Each is one row of the grid
+    recv_above = (Person*)calloc(width, sizeof(int));
+    recv_below = (Person*)calloc(width, sizeof(int));
+}
+
+void Send_Recv_Destroy() {
+    // Each is one row of the grid
+    free(recv_above);
+    free(recv_below);
+}
 
 void InitPerson(Person* person) {
 	person->age = (unsigned int) ((random() % 89) + 1);
@@ -146,7 +136,7 @@ void DestroyBoard(Board* b) {
 void PrintBoard(Board* b) {
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
-			printf(" %c ", stateNames[b->current[i][j].state]);
+			printf(" %c ", cell_state_names[b->current[i][j].state]);
 		}
 		putchar('\n');
 	}
@@ -201,13 +191,22 @@ size_t get_infected_neighbors(Board* b, unsigned int x, unsigned int y) {
 
 	// We only care about infected cells in state I,
 	// infected cells in state W are non-infectious
-    if (y != 0) {
+    if (y == 0) {
+        count += (recv_below[x].state == INFECTED_CELL); // down 1
+        count += (recv_below[left].state == INFECTED_CELL); // Diagonal left down -> wrap to right edge
+        count += (recv_below[right].state == INFECTED_CELL); // Diagonal right down
+    } else {
         count += (b->current[y-1][right].state == INFECTED_CELL); // down and right
         count += (b->current[y-1][x].state == INFECTED_CELL); // just down
         count += (b->current[y-1][left].state == INFECTED_CELL); // down and left
     }
 
-    if (y != b->height - 1) {
+
+    if (y == b->height - 1) {
+        count += (recv_above[x].state == INFECTED_CELL); // up 1
+        count += (recv_above[left].state == INFECTED_CELL); // Diagonal left up -> wrap to right edge
+        count += (recv_above[right].state == INFECTED_CELL); // Diagonal right up
+    } else {
         count += (b->current[y+1][x].state == INFECTED_CELL); // Just up
         count += (b->current[y+1][left].state == INFECTED_CELL); // UP and left
         count += (b->current[y+1][right].state == INFECTED_CELL); // UP and right
@@ -284,11 +283,11 @@ void* rowTick(void* argp) {
 	unsigned int end = j + num_rows - 1;
 	for (; j < end; j++) {
 		for (size_t i = 0; i < bc.width; i++) {
-		    cell_state next = next_state(&bc, j, i);
+		    cell_state nextState = next_state(&bc, j, i);
 
-		    if (bc.current[j][i].state != next) {
+		    if (bc.current[j][i].state != nextState) {
 		        bc.next[j][i].time_in_state = 0;
-		        bc.next[j][i].state = next;
+		        bc.next[j][i].state = nextState;
 		    } else {
                 bc.next[j][i].time_in_state++;
             }
@@ -302,15 +301,40 @@ void* rowTick(void* argp) {
  * Master function to handle all actions for each time unit
  */
 void tick(Board* b) {
-	// Copy Board
-	for (size_t i = 0; i < b->height; i++) {
-		memcpy(b->next[i], b->current[i], sizeof(b->current));
-	}
+    int rankUp = (world_rank == 0) ? (world_size - 1) : (world_rank - 1);
+    int rankDown = (world_rank == (world_size - 1)) ? 0 : (world_rank + 1);
+
+    send_above = b->current[0];
+    send_below = b->current[b->height-1];
+
+    // Send at the beginning of the tick
+    // Send top of chunk to rank+1
+    MPI_Isend(send_above, b->width, MPI_PERSON, rankUp, 0, MPI_COMM_WORLD, &sendUp);
+
+    // Send bottom of chunk to rank-1
+    MPI_Isend(send_below, b->width, MPI_PERSON, rankDown, 0, MPI_COMM_WORLD, &sendDown);
+
+    // Recieve from rank-1 as bottom
+    MPI_Irecv(recv_above, b->width, MPI_PERSON, rankUp, 0, MPI_COMM_WORLD, &recieveUp);
+
+    // Recieve from rank+1 as top
+    MPI_Irecv(recv_below, b->width, MPI_PERSON, rankDown, 0, MPI_COMM_WORLD, &recieveDown);
+
+    // Copy Board
+    for (size_t i = 0; i < b->height; i++) {
+        memcpy(b->next[i], b->current[i], sizeof(b->current));
+    }
+
 
 #if NUM_THREADS
 	pthread_t* tid = calloc(NUM_THREADS, sizeof(pthread_t));
 #endif
 	size_t* tmpI = calloc(NUM_THREADS, sizeof(size_t));
+
+    MPI_Wait(&sendUp, &mpi_stat);
+    MPI_Wait(&sendDown, &mpi_stat);
+    MPI_Wait(&recieveUp, &mpi_stat);
+    MPI_Wait(&recieveDown, &mpi_stat);
 
 	pthread_t parent = pthread_self();
 
@@ -347,6 +371,8 @@ int main(int argc, char *argv[]) {
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
+    mpi_create_person_type();
+
     if (world_rank == 0) {
         g_start_cycles = (unsigned long long)GetTimeBase();
     }
@@ -356,6 +382,7 @@ int main(int argc, char *argv[]) {
 
     size_t chunk = GRID_SIZE / world_size;
 	InitBoard(&bc, GRID_SIZE, chunk);
+    Send_Recv_Init(bc.width);
 
     unsigned int people, infected;
 
@@ -421,13 +448,14 @@ int main(int argc, char *argv[]) {
     PrintBoard(&bc);
 #endif
 
-    DestroyBoard(&bc);
-
     if (world_rank == 0) {
         g_end_cycles = (unsigned long long) GetTimeBase();
         g_time_in_secs = (double)(g_end_cycles - g_start_cycles) / PROC_FREQ;
         printf("Time = %f\n", g_time_in_secs);
     }
+
+    //DestroyBoard(&bc);
+    Send_Recv_Destroy();
 
 	return 0;
 }
