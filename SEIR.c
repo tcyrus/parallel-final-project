@@ -35,14 +35,16 @@
 /* Defines *****************************************************************/
 /***************************************************************************/
 
-#define GRID_SIZE 30
-#define NUM_THREADS 8
+#define GRID_SIZE 50
+#define NUM_THREADS 4
 // May look into making ticks represent hours, up to a number of days?
-#define MAX_TICKS 256
+#define MAX_TICKS 20
 #define POPULATION_RATE 50 // Out of 100
 #define INFECTION_RATE 10 // Out of 100
 #define RECOVERY_RATE 3
 #define INFECTIVE_TIME 8
+
+
 
 #define OUT_FILE "thresh.txt"
 
@@ -61,8 +63,6 @@ double g_time_in_secs = 0;
 
 unsigned long long g_start_cycles = 0;
 unsigned long long g_end_cycles = 0;
-
-const double MORTALITY_RATE[] = {8, 5, 2, 0.5, 2, 8};
 
 Person* send_above;
 Person* send_below;
@@ -97,6 +97,13 @@ void Send_Recv_Destroy() {
 void InitPerson(Person* person) {
 	person->age = (unsigned int) (random() % 89) + 1;
 	person->time_in_state = 0;
+    int chance = (int)(random() % 100);
+    if (chance > POPULATION_RATE) {
+        person->state = SUSCEPTIBLE_CELL;
+    }
+    else {
+        person->state = FREE_CELL;
+    }
 }
 
 // Handles board initialization
@@ -113,17 +120,12 @@ void InitBoard(Board* b, size_t width, size_t height) {
 
 		for (size_t j = 0; j < width; j++) {
 			// Init based on population of board
-			int chance = (int)(random() % 100);
-			InitPerson(&(b->current[i][j]));
+			Person newPerson;
+            InitPerson(&newPerson);
+            bc.current[i][j] = newPerson;
 
-            /*if (i == 0 || j == 0 || i == height-1 || j == width-1) {
-                b->current[i][j].state = BOARDER_CELL;
-            } else */if (chance > POPULATION_RATE) {
-				b->current[i][j].state = SUCEPTIBLE_CELL;
-			} else {
-				b->current[i][j].state = FREE_CELL;
-			}
-		}
+
+        }
 	}
 }
 
@@ -141,6 +143,7 @@ void DestroyBoard(Board* b) {
 void PrintBoard(Board* b) {
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
+		    //printf(" %d ", b->current[i][j].state);
 			printf(" %c ", cell_state_names[b->current[i][j].state]);
 		}
 		putchar('\n');
@@ -172,7 +175,7 @@ void infect_people(Board* b) {
 	// We will infect a certain percent of the population as a starting point
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
-			if (b->current[i][j].state != SUCEPTIBLE_CELL) {
+			if (b->current[i][j].state != SUSCEPTIBLE_CELL) {
 				int infected = random() % 100;
 				if (infected < INFECTION_RATE) {
 					b->current[i][j].state = INFECTED_CELL;
@@ -294,7 +297,7 @@ bool Compute_Recovery(Person* person) {
     else{
         double recoveryChance = (random() % 1000) / 10.0;
         double recoveryRate = RECOVERY_RATE * stateTime;
-        if (recoveryChance > recoveryRate) {
+        if (recoveryChance < recoveryRate) {
             recovers = true;
         }
     }
@@ -313,11 +316,11 @@ cell_state next_state(Board* b, unsigned int x, unsigned int y) {
 
 	// Check current persons state to decide action
 	switch (current_person->state) {
-        case SUCEPTIBLE_CELL: {
+        case SUSCEPTIBLE_CELL: {
             // If suceptible, count infected neighbors, decide if exposed
             size_t infectedNeighbors = get_infected_neighbors(b, x, y);
             int infectChance = (random() % 20) * infectedNeighbors;
-            return (infectChance > 60) ? EXPOSED_CELL : SUCEPTIBLE_CELL;
+            return (infectChance > 10) ? EXPOSED_CELL : SUSCEPTIBLE_CELL;
         }
         case EXPOSED_CELL:
             // Decide if moves to Infected
@@ -373,11 +376,11 @@ void* rowTick(void* argp) {
 	num_rows /= NUM_THREADS;
 #endif
 	unsigned int j = (*((size_t*)argp)) * num_rows;
-	unsigned int end = j + num_rows - 1;
+	unsigned int end = j + num_rows;
+
 	for (; j < end; j++) {
 		for (size_t i = 0; i < bc.width; i++) {
 		    cell_state nextState = next_state(&bc, j, i);
-
 		    if (bc.current[j][i].state != nextState) {
 		        bc.next[j][i].time_in_state = 0;
 		        bc.next[j][i].state = nextState;
@@ -399,7 +402,9 @@ void tick(Board* b) {
 
     // Copy Board
     for (size_t i = 0; i < b->height; i++) {
-        memcpy(b->next[i], b->current[i], sizeof(Person*) * b->width);
+        for (size_t j=0; j < b->width; j++) {
+            memcpy(&b->next[i][j], &b->current[i][j], sizeof(Person));
+        }
     }
 
     send_above = b->current[0];
@@ -430,6 +435,7 @@ void tick(Board* b) {
     MPI_Wait(&sendDown, &mpi_stat);
     MPI_Wait(&recieveUp, &mpi_stat);
     MPI_Wait(&recieveDown, &mpi_stat);
+
 
 	pthread_t parent = pthread_self();
 
@@ -480,7 +486,7 @@ int main(int argc, char *argv[]) {
 
     unsigned int people, infected;
 
-    people = count_people(&bc, SUCEPTIBLE_CELL);
+    people = count_people(&bc, SUSCEPTIBLE_CELL);
 
     infect_people(&bc);
 
@@ -489,23 +495,29 @@ int main(int argc, char *argv[]) {
     printf("Number of people suceptible: %d out of %d\n", people, GRID_SIZE*GRID_SIZE);
 	printf("Number of people infected: %d out of %d\n", infected, people);
 
-#ifdef DEBUG
-    PrintBoard(&bc);
-#endif
+
 
     unsigned long long infectedCount[MAX_TICKS];
+    //unsigned long long recoveredCount[MAX_TICKS];
 
     // Begin actual experiment
 	for (size_t i = 0; i < MAX_TICKS; i++) {
+#ifdef DEBUG
+        PrintBoard(&bc);
+#endif
 	    tick(&bc);
         MPI_Barrier(MPI_COMM_WORLD);
         unsigned long long tmp = count_people(&bc, INFECTED_CELL) + count_people(&bc, WITHOUT_CELL);
         MPI_Reduce((void*)&tmp, (void*)&(infectedCount[i]), 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD);
+        //tmp = count_people(&bc, RECOVERED_CELL);
+        //MPI_Reduce((void*)&tmp, (void*)&(recoveredCount[i]), 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 	}
 
     if (world_rank == 0) {
         for (size_t i = 0; i < MAX_TICKS; i++) {
             printf("Number of people infected: %lld out of %d\n", infectedCount[i], people);
+            //printf("Number of people recovered: %lld out of %d\n", recoveredCount[i], people);
         }
     }
 
