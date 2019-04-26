@@ -41,6 +41,8 @@
 #define MAX_TICKS 256
 #define POPULATION_RATE 50 // Out of 100
 #define INFECTION_RATE 10 // Out of 100
+#define RECOVERY_RATE 3
+#define INFECTIVE_TIME 8
 
 #define OUT_FILE "thresh.txt"
 
@@ -93,7 +95,7 @@ void Send_Recv_Destroy() {
 }
 
 void InitPerson(Person* person) {
-	person->age = (unsigned int) ((random() % 89) + 1);
+	person->age = (unsigned int) (random() % 89) + 1;
 	person->time_in_state = 0;
 }
 
@@ -111,7 +113,7 @@ void InitBoard(Board* b, size_t width, size_t height) {
 
 		for (size_t j = 0; j < width; j++) {
 			// Init based on population of board
-			int chance = random() % 100;
+			int chance = (int)(random() % 100);
 			InitPerson(&(b->current[i][j]));
 
             /*if (i == 0 || j == 0 || i == height-1 || j == width-1) {
@@ -224,22 +226,99 @@ size_t get_infected_neighbors(Board* b, unsigned int x, unsigned int y) {
 }
 
 /*
+ * Decides if a given person will die from the disease based on their age.
+ */
+bool Compute_Death(Person* person){
+    unsigned int age = person->age;
+    srandom(time(NULL) + age);
+    double death_chance = (random() % 1000) / 10.0;
+    bool death = false;
+
+    //Age range : 1 - 3, 8% mortality rate
+    if (age > 1 && age <= 3) {
+        if (death_chance < 8) {
+            death = true;
+        }
+    }
+    //Age range : 4 - 10, 5% mortality rate
+    if (age > 4 && age <= 10) {
+        if (death_chance < 5) {
+            death = true;
+        }
+    }
+    //Age range : 11 - 18, 2% mortality rate
+    if (age > 11 && age <= 18) {
+        if (death_chance < 2) {
+            death = true;
+        }
+    }
+    //Age range : 19 - 50, 0.5% mortality rate
+    if (age > 19 && age <= 50) {
+        if (death_chance < 0.5) {
+            death = true;
+        }
+    }
+    //Age range : 51 - 90, 2% mortality rate
+    if (age > 51 && age <=60) {
+        if (death_chance < 2) {
+            death = true;
+        }
+    }
+    //Age range : 61+ 8% mortality rate
+    if (age > 51 && age <=60) {
+        if (death_chance < 8) {
+            death = true;
+        }
+    }
+
+    return death;
+}
+
+/*
+ * Computes the chance of recovery for a person who is infected
+ * Uses the age, as well as the number of days they have been infected
+ * If in state WITHOUT_CELL, add an additional 8 days (or however long the infective period is)
+ */
+bool Compute_Recovery(Person* person) {
+    bool recovers = false;
+    unsigned int age = person->age;
+    unsigned int stateTime = person->time_in_state;
+    srand(time(NULL) + (age * stateTime));
+    if (person->state == WITHOUT_CELL) {
+        stateTime += INFECTIVE_TIME;
+    }
+
+    if (stateTime > 15) {
+        return true;
+    }
+    else{
+        double recoveryChance = (random() % 1000) / 10.0;
+        double recoveryRate = RECOVERY_RATE * stateTime;
+        if (recoveryChance > recoveryRate) {
+            recovers = true;
+        }
+    }
+
+    return recovers;
+}
+
+/*
 * This function will compute the next state for any given cell at the current time
 * Parameters: x and y coordinates of target cell, and pointer to board itself
 * Output: The value of the state that will succeed this state
-*  TODO Should this function return a state or modify the state? probably return
+*
 */
 cell_state next_state(Board* b, unsigned int x, unsigned int y) {
     Person* current_person = &(b->current[x][y]);
 
 	// Check current persons state to decide action
 	switch (current_person->state) {
-	    case SUCEPTIBLE_CELL: {
+        case SUCEPTIBLE_CELL: {
             // If suceptible, count infected neighbors, decide if exposed
             size_t infectedNeighbors = get_infected_neighbors(b, x, y);
             int infectChance = (random() % 20) * infectedNeighbors;
             return (infectChance > 60) ? EXPOSED_CELL : SUCEPTIBLE_CELL;
-	    }
+        }
         case EXPOSED_CELL:
             // Decide if moves to Infected
             // TODO Need to decide on a incubation period for the infection to start
@@ -247,21 +326,30 @@ cell_state next_state(Board* b, unsigned int x, unsigned int y) {
                 return INFECTED_CELL;
             } else {}
             break;
-	    case INFECTED_CELL:
+        case INFECTED_CELL:
             // Decide if moves to W or D or R
             // TODO Time will decide if => W, other will decide if D or R
-            if (current_person->time_in_state < 8) {
-                int change = (int)(random() % 100);
-                if (change < 10) {
-                    int recovery = (int)(random() % 100);
-                    return (recovery > 8) ? RECOVERED_CELL : DEAD_CELL;
+            if (current_person->time_in_state < INFECTIVE_TIME) {
+                bool recovers = Compute_Recovery(current_person);
+                if (recovers) {
+                    return RECOVERED_CELL;
                 }
                 return INFECTED_CELL;
             }
             return WITHOUT_CELL;
-        case WITHOUT_CELL:
+        case WITHOUT_CELL: {
+
             // Decide if moves to R or D
-            break;
+            bool dies = Compute_Death(current_person);
+            if (dies) {
+                return DEAD_CELL;
+            }
+            bool recovers = Compute_Recovery(current_person);
+            if (recovers) {
+                return RECOVERED_CELL;
+            }
+            return WITHOUT_CELL;
+        }
 	    case FREE_CELL:
 	        // Decide if person will move into free cell
 
@@ -438,7 +526,7 @@ int main(int argc, char *argv[]) {
     }
 
     global_sum = 0;
-    unsigned long long dead = count_people(&bc, RECOVERED_CELL);
+    unsigned long long dead = count_people(&bc, DEAD_CELL);
     MPI_Reduce((void*)&dead, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
         dead = global_sum;
