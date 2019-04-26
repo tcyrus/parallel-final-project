@@ -18,8 +18,6 @@
 #include <mpi.h>
 #include <pthread.h>
 
-#define DEBUG 1
-
 #include "cell_state.h"
 #include "person.h"
 #include "board.h"
@@ -253,7 +251,7 @@ cell_state next_state(Board* b, unsigned int x, unsigned int y) {
                 int change = random() % 100;
                 if (change < 10) {
                     int recovery = random() % 100;
-                    return (recovery > 80) ? RECOVERED_CELL : DEAD_CELL;
+                    return (recovery > 8) ? RECOVERED_CELL : DEAD_CELL;
                 }
                 return INFECTED_CELL;
             }
