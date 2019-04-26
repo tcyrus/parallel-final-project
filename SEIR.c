@@ -44,9 +44,6 @@
 #define RECOVERY_RATE 3
 #define INFECTIVE_TIME 8
 
-
-
-
 #define OUT_FILE "thresh.txt"
 
 Person* recv_above;
@@ -64,8 +61,6 @@ double g_time_in_secs = 0;
 
 unsigned long long g_start_cycles = 0;
 unsigned long long g_end_cycles = 0;
-
-
 
 Person* send_above;
 Person* send_below;
@@ -98,13 +93,12 @@ void Send_Recv_Destroy() {
 }
 
 void InitPerson(Person* person) {
-	person->age = (unsigned int) (random() % 89) + 1;
+	person->age = (unsigned int)(random() % 89) + 1;
 	person->time_in_state = 0;
     int chance = (int)(random() % 100);
     if (chance > POPULATION_RATE) {
         person->state = SUSCEPTIBLE_CELL;
-    }
-    else {
+    } else {
         person->state = FREE_CELL;
     }
 }
@@ -123,11 +117,7 @@ void InitBoard(Board* b, size_t width, size_t height) {
 
 		for (size_t j = 0; j < width; j++) {
 			// Init based on population of board
-			Person newPerson;
-            InitPerson(&newPerson);
-            bc.current[i][j] = newPerson;
-
-
+            InitPerson(&(bc.current[i][j]));
         }
 	}
 }
@@ -195,7 +185,7 @@ void infect_people(Board* b) {
 * We will make the border of the world be a border, so this function will 
 * never recieve a cell on the edge of the grid
 */
-size_t get_infected_neighbors(Board* b, unsigned int x, unsigned int y) {
+size_t get_infected_neighbors(Board* b, unsigned int y, unsigned int x) {
 	// We will not be using wrap around for this version
 	size_t count = 0;
     int left = (x == 0) ? (b->width - 1) : (x - 1);
@@ -296,8 +286,7 @@ bool Compute_Recovery(Person* person) {
 
     if (stateTime > 15) {
         return true;
-    }
-    else{
+    } else {
         double recoveryChance = (random() % 1000) / 10.0;
         double recoveryRate = RECOVERY_RATE * stateTime;
         if (recoveryChance < recoveryRate) {
@@ -314,10 +303,9 @@ int* getLiveNeighbors(Board* b, unsigned int x, unsigned int y) {
     int left = (x == 0) ? (b->width - 1) : (x - 1);
     int right = (x == b->width - 1) ? 0 : (x + 1);
 
-    for (int i=0; i<9; i++) {
+    for (int i = 0; i < 9; i++) {
         neighbors[i] = 0;
     }
-
 
     /*
      * Return will be organized as follows
@@ -334,7 +322,7 @@ int* getLiveNeighbors(Board* b, unsigned int x, unsigned int y) {
             neighbors[7] = 1;
         if (recv_below[left].state != DEAD_CELL && recv_below[left].state != FREE_CELL)
             neighbors[6] = 1; // Diagonal left down -> wrap to right edge
-       if (recv_below[right].state != DEAD_CELL && recv_below[right].state != FREE_CELL)
+        if (recv_below[right].state != DEAD_CELL && recv_below[right].state != FREE_CELL)
            neighbors[8] = 1;// Diagonal right down
     }
     else {
@@ -379,14 +367,14 @@ int* getLiveNeighbors(Board* b, unsigned int x, unsigned int y) {
 * Output: The value of the state that will succeed this state
 *
 */
-cell_state next_state(Board* b, unsigned int x, unsigned int y) {
-    Person* current_person = &(b->current[x][y]);
+cell_state next_state(Board* b, unsigned int row, unsigned int col) {
+    Person* current_person = &(b->current[row][col]);
 
 	// Check current persons state to decide action
 	switch (current_person->state) {
         case SUSCEPTIBLE_CELL: {
             // If suceptible, count infected neighbors, decide if exposed
-            size_t infectedNeighbors = get_infected_neighbors(b, x, y);
+            size_t infectedNeighbors = get_infected_neighbors(b, row, col);
             int infectChance = (random() % 20) * infectedNeighbors;
             return (infectChance > 15) ? EXPOSED_CELL : SUSCEPTIBLE_CELL;
         }
@@ -449,22 +437,23 @@ void* rowTick(void* argp) {
 #if NUM_THREADS
 	num_rows /= NUM_THREADS;
 #endif
-	unsigned int j = (*((size_t*)argp)) * num_rows;
-	unsigned int end = j + num_rows;
+	unsigned int row = (*((size_t*)argp)) * num_rows;
+	unsigned int end = row + num_rows - 1;
 
-	for (; j < end; j++) {
-		for (size_t i = 0; i < bc.width; i++) {
-		    cell_state nextState = next_state(&bc, j, i);
-		    if (bc.current[j][i].state != nextState) {
-		        bc.next[j][i].time_in_state = 0;
-		        bc.next[j][i].state = nextState;
+	for (; row < end; row++) {
+		for (unsigned int col = 0; col < bc.width; col++) {
+            cell_state nextState = next_state(&bc, row, col);
+		    if (bc.current[row][col].state != nextState) {
+		        bc.next[row][col].time_in_state = 0;
+		        bc.next[row][col].state = nextState;
 		    } else {
-                bc.next[j][i].time_in_state++;
+                bc.next[row][col].time_in_state++;
             }
-		}
+        }
 	}
 
-	return NULL;
+
+    return NULL;
 }
 
 /*
@@ -476,9 +465,7 @@ void tick(Board* b) {
 
     // Copy Board
     for (size_t i = 0; i < b->height; i++) {
-        for (size_t j=0; j < b->width; j++) {
-            memcpy(&b->next[i][j], &b->current[i][j], sizeof(Person));
-        }
+        memcpy(b->next[i], b->current[i], sizeof(Person) * b->width);
     }
 
     send_above = b->current[0];
@@ -510,8 +497,7 @@ void tick(Board* b) {
     MPI_Wait(&recieveUp, &mpi_stat);
     MPI_Wait(&recieveDown, &mpi_stat);
 
-
-	pthread_t parent = pthread_self();
+    pthread_t parent = pthread_self();
 
 	tmpI[0] = 0;
 
@@ -558,7 +544,7 @@ int main(int argc, char *argv[]) {
 	InitBoard(&bc, GRID_SIZE, chunk);
     Send_Recv_Init(bc.width);
 
-    unsigned int people, infected;
+    unsigned long long people, infected, tmp;
 
     people = count_people(&bc, SUSCEPTIBLE_CELL);
 
@@ -566,31 +552,38 @@ int main(int argc, char *argv[]) {
 
     infected = count_people(&bc, INFECTED_CELL);
 
-    printf("Number of people suceptible: %d out of %d\n", people, GRID_SIZE*GRID_SIZE);
-	printf("Number of people infected: %d out of %d\n", infected, people);
+    MPI_Reduce((void*)&people, (void*)&tmp, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        people = tmp;
+        printf("Number of people susceptible: %lld out of %d\n", people, GRID_SIZE*GRID_SIZE);
+    }
 
-
+    MPI_Reduce((void*)&infected, (void*)&tmp, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        infected = tmp;
+        printf("Number of people infected: %lld out of %lld\n", infected, people);
+    }
 
     unsigned long long infectedCount[MAX_TICKS];
-    unsigned long long numInfected = (unsigned long long)infected;
+    //unsigned long long numInfected = (unsigned long long)infected;
     //unsigned long long recoveredCount[MAX_TICKS];
 
     // Begin actual experiment
-    unsigned int day=0;
-	while(numInfected > 0) {
+    unsigned int day = 0;
+    for (day = 0; day < MAX_TICKS; day++) {
 #ifdef DEBUG
         PrintBoard(&bc);
 #endif
 	    tick(&bc);
+
+        infectedCount[day] = count_people(&bc, INFECTED_CELL) + count_people(&bc, WITHOUT_CELL);
+
         MPI_Barrier(MPI_COMM_WORLD);
-        unsigned long long tmp = count_people(&bc, INFECTED_CELL) + count_people(&bc, WITHOUT_CELL);
-        MPI_Reduce((void*)&tmp, (void*)&(infectedCount[day]), 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Allreduce((void*)&(infectedCount[day]), (void*)&tmp, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
         MPI_Barrier(MPI_COMM_WORLD);
-        numInfected = infectedCount[day];
-        day++;
-        if (day >= MAX_TICKS) {
-            break;
-        }
+
+        if (world_rank == 0) { infectedCount[day] = tmp; }
+        if (tmp == 0) { break; }
         //tmp = count_people(&bc, RECOVERED_CELL);
         //MPI_Reduce((void*)&tmp, (void*)&(recoveredCount[i]), 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 	}
@@ -598,7 +591,7 @@ int main(int argc, char *argv[]) {
     if (world_rank == 0) {
         printf("Days elapsed: %u\n", day);
         for (size_t i = 0; i < day; i++) {
-            printf("Number of people infected: %lld out of %d\n", infectedCount[i], people);
+            printf("Number of people infected: %lld out of %lld\n", infectedCount[i], people);
             //printf("Number of people recovered: %lld out of %d\n", recoveredCount[i], people);
         }
     }
@@ -608,7 +601,7 @@ int main(int argc, char *argv[]) {
     MPI_Reduce((void*)&recovered, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
         recovered = global_sum;
-        printf("Number of people recovered: %lld out of %d\n", recovered, people);
+        printf("Number of people recovered: %lld out of %lld\n", recovered, people);
     }
 
     global_sum = 0;
@@ -616,7 +609,7 @@ int main(int argc, char *argv[]) {
     MPI_Reduce((void*)&dead, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
         dead = global_sum;
-        printf("Number of people dead: %lld out of %d\n", dead, people);
+        printf("Number of people dead: %lld out of %lld\n", dead, people);
     }
 
 #ifdef DEBUG
