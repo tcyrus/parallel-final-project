@@ -18,6 +18,8 @@
 #include <mpi.h>
 #include <pthread.h>
 
+#define DEBUG 1
+
 #include "cell_state.h"
 #include "person.h"
 #include "board.h"
@@ -36,7 +38,7 @@
 /***************************************************************************/
 
 #define GRID_SIZE 30
-#define NUM_THREADS 4
+#define NUM_THREADS 0
 // May look into making ticks represent hours, up to a number of days?
 #define MAX_TICKS 256
 #define POPULATION_RATE 50 // Out of 100
@@ -140,6 +142,7 @@ void PrintBoard(Board* b) {
 		}
 		putchar('\n');
 	}
+    putchar('\n');
 }
 #endif
 
@@ -147,8 +150,8 @@ void PrintBoard(Board* b) {
  Returns the number of people in a given state
  Takes a value from enum state as second argument
 */
-unsigned int count_people(Board* b, cell_state cell) {
-	unsigned int count = 0;
+unsigned long long count_people(Board* b, cell_state cell) {
+	unsigned long long count = 0;
 	for (size_t i = 0; i < b->height; i++) {
 		for (size_t j = 0; j < b->width; j++) {
 			if (b->current[i][j].state == cell)
@@ -250,12 +253,10 @@ cell_state next_state(Board* b, unsigned int x, unsigned int y) {
                 int change = random() % 100;
                 if (change < 10) {
                     int recovery = random() % 100;
-                    return (recovery > 8) ? RECOVERED_CELL : DEAD_CELL;
+                    return (recovery > 80) ? RECOVERED_CELL : DEAD_CELL;
                 }
-
                 return INFECTED_CELL;
             }
-
             return WITHOUT_CELL;
         case WITHOUT_CELL:
             // Decide if moves to R or D
@@ -275,6 +276,8 @@ cell_state next_state(Board* b, unsigned int x, unsigned int y) {
  * Thread running function to perform the work for each tick on the cells
  */
 void* rowTick(void* argp) {
+    srandom(time(NULL) + world_rank);
+
     unsigned int num_rows = bc.height;
 #if NUM_THREADS
 	num_rows /= NUM_THREADS;
@@ -304,6 +307,11 @@ void tick(Board* b) {
     int rankUp = (world_rank == 0) ? (world_size - 1) : (world_rank - 1);
     int rankDown = (world_rank == (world_size - 1)) ? 0 : (world_rank + 1);
 
+    // Copy Board
+    for (size_t i = 0; i < b->height; i++) {
+        memcpy(b->next[i], b->current[i], sizeof(Person*)*b->width);
+    }
+
     send_above = b->current[0];
     send_below = b->current[b->height-1];
 
@@ -320,16 +328,11 @@ void tick(Board* b) {
     // Recieve from rank+1 as top
     MPI_Irecv(recv_below, b->width, MPI_PERSON, rankDown, 0, MPI_COMM_WORLD, &recieveDown);
 
-    // Copy Board
-    for (size_t i = 0; i < b->height; i++) {
-        memcpy(b->next[i], b->current[i], sizeof(b->current));
-    }
-
 
 #if NUM_THREADS
-	pthread_t* tid = calloc(NUM_THREADS, sizeof(pthread_t));
+	pthread_t tid[NUM_THREADS];
 #endif
-	size_t* tmpI = calloc(NUM_THREADS, sizeof(size_t));
+	size_t tmpI[NUM_THREADS];
 
     MPI_Wait(&sendUp, &mpi_stat);
     MPI_Wait(&sendDown, &mpi_stat);
@@ -355,10 +358,7 @@ void tick(Board* b) {
 	for (size_t i = 1; i < NUM_THREADS; i++) {
 		pthread_join(tid[i], NULL);
 	}
-
-	free(tid);
 #endif
-	free(tmpI);
 
 	Person** tmp = b->current;
 	b->current = b->next;
@@ -378,7 +378,7 @@ int main(int argc, char *argv[]) {
     }
 
 	// Using built in random for now, may change out later
-	srandom(time(NULL));
+	srandom(time(NULL) + world_rank);
 
     size_t chunk = GRID_SIZE / world_size;
 	InitBoard(&bc, GRID_SIZE, chunk);
@@ -399,28 +399,23 @@ int main(int argc, char *argv[]) {
     PrintBoard(&bc);
 #endif
 
-    unsigned long long* infectedCount = (unsigned long long*)calloc(MAX_TICKS, sizeof(unsigned long long));
+    unsigned long long infectedCount[MAX_TICKS];
 
     // Begin actual experiment
 	for (size_t i = 0; i < MAX_TICKS; i++) {
 	    tick(&bc);
-        infectedCount[i] = count_people(&bc, INFECTED_CELL) + count_people(&bc, WITHOUT_CELL);
         MPI_Barrier(MPI_COMM_WORLD);
+        unsigned long long tmp = count_people(&bc, INFECTED_CELL) + count_people(&bc, WITHOUT_CELL);
+        MPI_Reduce((void*)&tmp, (void*)&(infectedCount[i]), 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 	}
 
-    unsigned long long global_sum = 0;
-    for (size_t i = 0; i < MAX_TICKS; i++) {
-        global_sum = 0;
-
-        MPI_Reduce((void*)&(infectedCount[i]), (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
-
-        if (world_rank == 0) {
-            infectedCount[i] = global_sum;
+    if (world_rank == 0) {
+        for (size_t i = 0; i < MAX_TICKS; i++) {
             printf("Number of people infected: %lld out of %d\n", infectedCount[i], people);
         }
     }
 
-    global_sum = 0;
+    unsigned long long global_sum = 0;
     unsigned long long infect_no_spread = count_people(&bc, WITHOUT_CELL);
     MPI_Reduce((void*)&infect_no_spread, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
@@ -455,7 +450,7 @@ int main(int argc, char *argv[]) {
     }
 
     //DestroyBoard(&bc);
-    Send_Recv_Destroy();
+    //Send_Recv_Destroy();
 
 	return 0;
 }

@@ -11,7 +11,7 @@ set(CMAKE_C_COMPILER mpicc)
 
 set(CMAKE_C_STANDARD 11)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread -Wall -Wextra -O5")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread -Wall -Wextra")
 
 add_executable(SEIR SEIR.c cell_state.h person.h board.h)
 #add_executable(SEIR.xl SEIR.c)
