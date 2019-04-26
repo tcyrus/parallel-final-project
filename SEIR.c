@@ -35,7 +35,7 @@
 /* Defines *****************************************************************/
 /***************************************************************************/
 
-#define GRID_SIZE 4096
+#define GRID_SIZE 2048
 #define NUM_THREADS 16
 // May look into making ticks represent hours, up to a number of days?
 #define MAX_TICKS 1024
@@ -231,7 +231,7 @@ bool Compute_Death(Person* person){
     bool death = false;
 
     //Age range : 1 - 3, 8% mortality rate
-    if (age > 1 && age <= 3) {
+    if (age <= 3) {
         if (death_chance < 8) {
             death = true;
         }
@@ -261,7 +261,7 @@ bool Compute_Death(Person* person){
         }
     }
     //Age range : 61+ 8% mortality rate
-    if (age > 51 && age <=60) {
+    if (age > 60) {
         if (death_chance < 8) {
             death = true;
         }
@@ -555,13 +555,13 @@ int main(int argc, char *argv[]) {
     MPI_Reduce((void*)&people, (void*)&tmp, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
         people = tmp;
-        //printf("Number of people susceptible: %lld out of %d\n", people, GRID_SIZE*GRID_SIZE);
+        printf("Number of people susceptible: %lld out of %d\n", people, GRID_SIZE*GRID_SIZE);
     }
 
     MPI_Reduce((void*)&infected, (void*)&tmp, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
         infected = tmp;
-        //printf("Number of people infected: %lld out of %lld\n", infected, people);
+        printf("Number of people infected: %lld out of %lld\n", infected, people);
     }
 
     unsigned long long infectedCount[MAX_TICKS];
@@ -576,6 +576,9 @@ int main(int argc, char *argv[]) {
 #endif
 	    tick(&bc);
 
+	    if (day % 50 == 0)
+	        printf("Completed Tick # %d\n", day);
+
         infectedCount[day] = count_people(&bc, INFECTED_CELL) + count_people(&bc, WITHOUT_CELL);
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -589,7 +592,6 @@ int main(int argc, char *argv[]) {
 	}
 
     if (world_rank == 0) {
-        printf("Days elapsed: %u\n", day);
         for (size_t i = 0; i < day; i++) {
             printf("%lld\n", infectedCount[i]);
             //printf("Number of people recovered: %lld out of %d\n", recoveredCount[i], people);
@@ -601,7 +603,7 @@ int main(int argc, char *argv[]) {
     MPI_Reduce((void*)&recovered, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
         recovered = global_sum;
-        //printf("Number of people recovered: %lld out of %lld\n", recovered, people);
+        printf("Number of people recovered: %lld out of %lld\n", recovered, people);
     }
 
     global_sum = 0;
@@ -609,7 +611,7 @@ int main(int argc, char *argv[]) {
     MPI_Reduce((void*)&dead, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
         dead = global_sum;
-       // printf("Number of people dead: %lld out of %lld\n", dead, people);
+        printf("Number of people dead: %lld out of %lld\n", dead, people);
     }
 
 #ifdef DEBUG
@@ -622,6 +624,109 @@ int main(int argc, char *argv[]) {
         printf("Time = %f\n", g_time_in_secs);
     }
 
+    unsigned long long infected_children = 0,
+        infected_adults = 0,
+        infected_elders = 0,
+        dead_children = 0,
+        dead_adults = 0,
+        dead_elders = 0,
+        num_children = 0,
+        num_adults = 0,
+        num_elders = 0;
+
+
+    for (int row=0; row<bc.height; row++) {
+        for (int col=0; col<bc.width; col++) {
+            unsigned int age = bc.current[row][col].age;
+            cell_state state = bc.current[row][col].state;
+            if (age <= 18) {
+                num_children++;
+            }
+            else if (age > 18 && age <= 60) {
+                num_adults++;
+            }
+            else if (age > 60 ) {
+                num_elders++;
+            }
+            if (state == RECOVERED_CELL) {
+                if (age <= 18) {
+                    infected_children++;
+                }
+                else if (age > 18 && age <= 60) {
+                    infected_adults++;
+                }
+                else if (age > 60 ) {
+                    infected_elders++;
+                }
+            }
+            else if (state == DEAD_CELL) {
+                if (age <= 18) {
+                    dead_children++;
+                }
+                else if (age > 18 && age <= 60) {
+                    dead_adults++;
+                }
+                else if (age > 60) {
+                    dead_elders++;
+                }
+            }
+        }
+    }
+
+
+    global_sum = 0;
+    MPI_Reduce((void*)&num_children, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        num_children = global_sum;
+    }
+    global_sum = 0;
+    MPI_Reduce((void*)&num_adults, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        num_adults = global_sum;
+    }
+    global_sum = 0;
+    MPI_Reduce((void*)&num_elders, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        num_elders = global_sum;
+    }
+
+    global_sum = 0;
+    MPI_Reduce((void*)&infected_adults, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        infected_adults = global_sum;
+    }
+    global_sum = 0;
+    MPI_Reduce((void*)&infected_children, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        infected_children = global_sum;
+    }
+    global_sum = 0;
+    MPI_Reduce((void*)&infected_elders, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        infected_elders = global_sum;
+    }
+    global_sum = 0;
+    MPI_Reduce((void*)&dead_adults, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        dead_adults = global_sum;
+    }
+    global_sum = 0;
+    MPI_Reduce((void*)&dead_children, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        dead_children = global_sum;
+    }
+    global_sum = 0;
+    MPI_Reduce((void*)&dead_elders, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (world_rank == 0) {
+        dead_elders = global_sum;
+    }
+    if (world_rank == 0) {
+        printf("Age counts: Children: %lld\nAdules: %lld\nElders: %lld\n", num_children, num_adults, num_elders);
+        printf("Infected counts: Children: %lld\nAdults: %lld\nElders: %lld\n", infected_children, infected_adults,
+               infected_elders);
+        printf("Death counts: Children: %lld\nAdults: %lld\nElders: %lld\n", dead_children, dead_adults, dead_elders);
+        printf("Days elapsed: %u\n", day);
+    }
     DestroyBoard(&bc);
     Send_Recv_Destroy();
 
