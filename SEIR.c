@@ -60,7 +60,7 @@ double g_time_in_secs = 0;
 unsigned long long g_start_cycles = 0;
 unsigned long long g_end_cycles = 0;
 
-const double[] MORTALITY_RATE = {8, 5, 2, 0.5, 2, 8};
+const double MORTALITY_RATE[] = {8, 5, 2, 0.5, 2, 8};
 
 Person* send_above;
 Person* send_below;
