@@ -41,6 +41,7 @@
 #define MAX_TICKS 256
 #define POPULATION_RATE 50 // Out of 100
 #define INFECTION_RATE 10 // Out of 100
+
 #define OUT_FILE "thresh.txt"
 
 Person* recv_above;
@@ -58,6 +59,8 @@ double g_time_in_secs = 0;
 
 unsigned long long g_start_cycles = 0;
 unsigned long long g_end_cycles = 0;
+
+const double[] MORTALITY_RATE = {8, 5, 2, 0.5, 2, 8};
 
 Person* send_above;
 Person* send_below;
@@ -248,9 +251,9 @@ cell_state next_state(Board* b, unsigned int x, unsigned int y) {
             // Decide if moves to W or D or R
             // TODO Time will decide if => W, other will decide if D or R
             if (current_person->time_in_state < 8) {
-                int change = random() % 100;
+                int change = (int)(random() % 100);
                 if (change < 10) {
-                    int recovery = random() % 100;
+                    int recovery = (int)(random() % 100);
                     return (recovery > 8) ? RECOVERED_CELL : DEAD_CELL;
                 }
                 return INFECTED_CELL;
@@ -261,6 +264,7 @@ cell_state next_state(Board* b, unsigned int x, unsigned int y) {
             break;
 	    case FREE_CELL:
 	        // Decide if person will move into free cell
+
 	        break;
 	    default:
 	        break;
