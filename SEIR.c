@@ -35,14 +35,15 @@
 /* Defines *****************************************************************/
 /***************************************************************************/
 
-#define GRID_SIZE 32
+#define GRID_SIZE 128
 #define NUM_THREADS 8
 // May look into making ticks represent hours, up to a number of days?
-#define MAX_TICKS 20
+#define MAX_TICKS 256
 #define POPULATION_RATE 50 // Out of 100
-#define INFECTION_RATE 10 // Out of 100
+#define INFECTION_RATE 1 // Out of 100
 #define RECOVERY_RATE 3
 #define INFECTIVE_TIME 8
+
 
 
 
@@ -387,19 +388,21 @@ cell_state next_state(Board* b, unsigned int x, unsigned int y) {
             // If suceptible, count infected neighbors, decide if exposed
             size_t infectedNeighbors = get_infected_neighbors(b, x, y);
             int infectChance = (random() % 20) * infectedNeighbors;
-            return (infectChance > 10) ? EXPOSED_CELL : SUSCEPTIBLE_CELL;
+            return (infectChance > 15) ? EXPOSED_CELL : SUSCEPTIBLE_CELL;
         }
         case EXPOSED_CELL:
-            // Decide if moves to Infected
-            // TODO Need to decide on a incubation period for the infection to start
+            // Decide if moves to Infected, wait time is 5 days
             if (current_person->time_in_state >= 5) {
                 return INFECTED_CELL;
             } else {}
             break;
         case INFECTED_CELL:
             // Decide if moves to W or D or R
-            // TODO Time will decide if => W, other will decide if D or R
             if (current_person->time_in_state < INFECTIVE_TIME) {
+                bool dies = Compute_Death(current_person);
+                if (dies) {
+                    return DEAD_CELL;
+                }
                 bool recovers = Compute_Recovery(current_person);
                 if (recovers) {
                     return RECOVERED_CELL;
@@ -422,8 +425,8 @@ cell_state next_state(Board* b, unsigned int x, unsigned int y) {
         }
 	    case FREE_CELL: {
             // Decide if person will move into free cell
-            int* people = getLiveNeighbors(b, x, y);
-            int move_chance = (random() % 9);
+            //int* people = getLiveNeighbors(b, x, y);
+            //int move_chance = (random() % 9);
             //if (people[move_chance] == 1) {
               //  printf("would move a person here\n");
             //}
@@ -569,38 +572,38 @@ int main(int argc, char *argv[]) {
 
 
     unsigned long long infectedCount[MAX_TICKS];
+    unsigned long long numInfected = (unsigned long long)infected;
     //unsigned long long recoveredCount[MAX_TICKS];
 
     // Begin actual experiment
-	for (size_t i = 0; i < MAX_TICKS; i++) {
+    unsigned int day=0;
+	while(numInfected > 0) {
 #ifdef DEBUG
         PrintBoard(&bc);
 #endif
 	    tick(&bc);
         MPI_Barrier(MPI_COMM_WORLD);
         unsigned long long tmp = count_people(&bc, INFECTED_CELL) + count_people(&bc, WITHOUT_CELL);
-        MPI_Reduce((void*)&tmp, (void*)&(infectedCount[i]), 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Reduce((void*)&tmp, (void*)&(infectedCount[day]), 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
         MPI_Barrier(MPI_COMM_WORLD);
+        numInfected = infectedCount[day];
+        day++;
+        if (day >= MAX_TICKS) {
+            break;
+        }
         //tmp = count_people(&bc, RECOVERED_CELL);
         //MPI_Reduce((void*)&tmp, (void*)&(recoveredCount[i]), 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 	}
 
     if (world_rank == 0) {
-        for (size_t i = 0; i < MAX_TICKS; i++) {
+        printf("Days elapsed: %u\n", day);
+        for (size_t i = 0; i < day; i++) {
             printf("Number of people infected: %lld out of %d\n", infectedCount[i], people);
             //printf("Number of people recovered: %lld out of %d\n", recoveredCount[i], people);
         }
     }
 
     unsigned long long global_sum = 0;
-    unsigned long long infect_no_spread = count_people(&bc, WITHOUT_CELL);
-    MPI_Reduce((void*)&infect_no_spread, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
-    if (world_rank == 0) {
-        infect_no_spread = global_sum;
-        printf("Number of people infected without spreading: %lld out of %d\n", infect_no_spread, people);
-    }
-
-    global_sum = 0;
     unsigned long long recovered = count_people(&bc, RECOVERED_CELL);
     MPI_Reduce((void*)&recovered, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
