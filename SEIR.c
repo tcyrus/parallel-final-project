@@ -36,7 +36,7 @@
 /***************************************************************************/
 
 #define GRID_SIZE 30
-#define NUM_THREADS 0
+#define NUM_THREADS 8
 // May look into making ticks represent hours, up to a number of days?
 #define MAX_TICKS 256
 #define POPULATION_RATE 50 // Out of 100
@@ -332,9 +332,11 @@ void tick(Board* b) {
 
 
 #if NUM_THREADS
-	pthread_t tid[NUM_THREADS];
+	pthread_t* tid = calloc(NUM_THREADS, sizeof(pthread_t));
+	size_t* tmpI = calloc(NUM_THREADS, sizeof(size_t));
+#else
+	size_t tmpI[] = {0};
 #endif
-	size_t tmpI[NUM_THREADS];
 
     MPI_Wait(&sendUp, &mpi_stat);
     MPI_Wait(&sendDown, &mpi_stat);
@@ -360,6 +362,8 @@ void tick(Board* b) {
 	for (size_t i = 1; i < NUM_THREADS; i++) {
 		pthread_join(tid[i], NULL);
 	}
+	free(tid);
+	free(tmpI);
 #endif
 
 	Person** tmp = b->current;
@@ -451,7 +455,7 @@ int main(int argc, char *argv[]) {
         printf("Time = %f\n", g_time_in_secs);
     }
 
-    //DestroyBoard(&bc);
+    DestroyBoard(&bc);
     //Send_Recv_Destroy();
 
 	return 0;
