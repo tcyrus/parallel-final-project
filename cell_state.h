@@ -20,7 +20,7 @@
 typedef enum {
     BOARDER_CELL,
     FREE_CELL,
-    SUCEPTIBLE_CELL,
+    SUSCEPTIBLE_CELL,
     EXPOSED_CELL,
     INFECTED_CELL,
     RECOVERED_CELL,
@@ -32,7 +32,7 @@ typedef enum {
 #define cell_state unsigned int
 #define BOARDER_CELL 0
 #define FREE_CELL 1
-#define SUCEPTIBLE_CELL 2
+#define SUSCEPTIBLE_CELL 2
 #define EXPOSED_CELL 3
 #define INFECTED_CELL 4
 #define RECOVERED_CELL 5
