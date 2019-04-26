@@ -79,8 +79,8 @@ Board bc;
 
 void Send_Recv_Init(size_t width) {
     // Each is one row of the grid
-    recv_above = (Person*)calloc(width, sizeof(int));
-    recv_below = (Person*)calloc(width, sizeof(int));
+    recv_above = (Person*)calloc(width, sizeof(Person));
+    recv_below = (Person*)calloc(width, sizeof(Person));
 }
 
 void Send_Recv_Destroy() {
@@ -307,7 +307,7 @@ void tick(Board* b) {
 
     // Copy Board
     for (size_t i = 0; i < b->height; i++) {
-        memcpy(b->next[i], b->current[i], sizeof(Person*)*b->width);
+        memcpy(b->next[i], b->current[i], sizeof(Person*) * b->width);
     }
 
     send_above = b->current[0];
@@ -452,7 +452,7 @@ int main(int argc, char *argv[]) {
     }
 
     DestroyBoard(&bc);
-    //Send_Recv_Destroy();
+    Send_Recv_Destroy();
 
 	return 0;
 }
