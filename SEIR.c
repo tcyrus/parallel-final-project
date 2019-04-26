@@ -35,7 +35,7 @@
 /* Defines *****************************************************************/
 /***************************************************************************/
 
-#define GRID_SIZE 100
+#define GRID_SIZE 32
 #define NUM_THREADS 8
 // May look into making ticks represent hours, up to a number of days?
 #define MAX_TICKS 20
@@ -63,6 +63,8 @@ double g_time_in_secs = 0;
 
 unsigned long long g_start_cycles = 0;
 unsigned long long g_end_cycles = 0;
+
+
 
 Person* send_above;
 Person* send_below;
@@ -305,6 +307,71 @@ bool Compute_Recovery(Person* person) {
     return recovers;
 }
 
+
+int* getLiveNeighbors(Board* b, unsigned int x, unsigned int y) {
+    int* neighbors = calloc(9, sizeof(int));
+    int left = (x == 0) ? (b->width - 1) : (x - 1);
+    int right = (x == b->width - 1) ? 0 : (x + 1);
+
+    for (int i=0; i<9; i++) {
+        neighbors[i] = 0;
+    }
+
+
+    /*
+     * Return will be organized as follows
+     *
+     *      1  2  3
+     *      4  5  6
+     *      7  8  9
+     *
+     */
+    // Only cells that cannot move are DEAD_CELL and FREE_CELL
+    // All other are living and can move to a new state
+    if (y == 0) {
+        if (recv_below[x].state != DEAD_CELL && recv_below[x].state != FREE_CELL)// down 1 = 8
+            neighbors[7] = 1;
+        if (recv_below[left].state != DEAD_CELL && recv_below[left].state != FREE_CELL)
+            neighbors[6] = 1; // Diagonal left down -> wrap to right edge
+       if (recv_below[right].state != DEAD_CELL && recv_below[right].state != FREE_CELL)
+           neighbors[8] = 1;// Diagonal right down
+    }
+    else {
+        if (b->current[y-1][right].state != DEAD_CELL && b->current[y-1][right].state != FREE_CELL)
+            neighbors[8] = 1;// down and right
+        if (b->current[y-1][left].state != DEAD_CELL && b->current[y-1][left].state != FREE_CELL)
+            neighbors[6] = 1;// down and left
+        if (b->current[y-1][x].state != DEAD_CELL && b->current[y-1][x].state != FREE_CELL)
+            neighbors[7] = 1;// down
+    }
+
+
+    if (y == b->height - 1) {
+        if (recv_above[x].state != DEAD_CELL && recv_above[x].state != FREE_CELL)// up 1 = 2
+            neighbors[1] = 1;
+        if (recv_above[left].state != DEAD_CELL && recv_above[left].state != FREE_CELL)
+            neighbors[0] = 1; // Diagonal left up -> wrap to right edge
+        if (recv_above[right].state != DEAD_CELL && recv_above[right].state != FREE_CELL)
+            neighbors[2] = 1;// Diagonal right up
+
+    } else {
+        if (b->current[y+1][right].state != DEAD_CELL && b->current[y+1][right].state != FREE_CELL)
+            neighbors[2] = 1;// up and right
+        if (b->current[y+1][left].state != DEAD_CELL && b->current[y+1][left].state != FREE_CELL)
+            neighbors[0] = 1;// up and left
+        if (b->current[y+1][x].state != DEAD_CELL && b->current[y+1][x].state != FREE_CELL)
+            neighbors[1] = 1;// up
+
+    }
+
+    if (b->current[y][right].state != DEAD_CELL && b->current[y][right].state != FREE_CELL)
+        neighbors[5] = 1;// just right  6
+    if (b->current[y][left].state != DEAD_CELL && b->current[y][left].state != FREE_CELL)
+        neighbors[3] = 1;// just left  4
+
+    return neighbors;
+}
+
 /*
 * This function will compute the next state for any given cell at the current time
 * Parameters: x and y coordinates of target cell, and pointer to board itself
@@ -353,10 +420,14 @@ cell_state next_state(Board* b, unsigned int x, unsigned int y) {
             }
             return WITHOUT_CELL;
         }
-	    case FREE_CELL:
-	        // Decide if person will move into free cell
-
-	        break;
+	    case FREE_CELL: {
+            // Decide if person will move into free cell
+            int* people = getLiveNeighbors(b, x, y);
+            int move_chance = (random() % 9);
+            //if (people[move_chance] == 1) {
+              //  printf("would move a person here\n");
+            //}
+        }
 	    default:
 	        break;
     }
