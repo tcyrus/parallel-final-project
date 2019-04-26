@@ -35,10 +35,10 @@
 /* Defines *****************************************************************/
 /***************************************************************************/
 
-#define GRID_SIZE 128
-#define NUM_THREADS 8
+#define GRID_SIZE 4096
+#define NUM_THREADS 16
 // May look into making ticks represent hours, up to a number of days?
-#define MAX_TICKS 256
+#define MAX_TICKS 1024
 #define POPULATION_RATE 50 // Out of 100
 #define INFECTION_RATE 1 // Out of 100
 #define RECOVERY_RATE 3
@@ -370,6 +370,7 @@ int* getLiveNeighbors(Board* b, unsigned int x, unsigned int y) {
 cell_state next_state(Board* b, unsigned int row, unsigned int col) {
     Person* current_person = &(b->current[row][col]);
 
+
 	// Check current persons state to decide action
 	switch (current_person->state) {
         case SUSCEPTIBLE_CELL: {
@@ -438,8 +439,7 @@ void* rowTick(void* argp) {
 	num_rows /= NUM_THREADS;
 #endif
 	unsigned int row = (*((size_t*)argp)) * num_rows;
-	unsigned int end = row + num_rows - 1;
-
+	unsigned int end = row + num_rows;
 	for (; row < end; row++) {
 		for (unsigned int col = 0; col < bc.width; col++) {
             cell_state nextState = next_state(&bc, row, col);
@@ -555,13 +555,13 @@ int main(int argc, char *argv[]) {
     MPI_Reduce((void*)&people, (void*)&tmp, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
         people = tmp;
-        printf("Number of people susceptible: %lld out of %d\n", people, GRID_SIZE*GRID_SIZE);
+        //printf("Number of people susceptible: %lld out of %d\n", people, GRID_SIZE*GRID_SIZE);
     }
 
     MPI_Reduce((void*)&infected, (void*)&tmp, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
         infected = tmp;
-        printf("Number of people infected: %lld out of %lld\n", infected, people);
+        //printf("Number of people infected: %lld out of %lld\n", infected, people);
     }
 
     unsigned long long infectedCount[MAX_TICKS];
@@ -591,7 +591,7 @@ int main(int argc, char *argv[]) {
     if (world_rank == 0) {
         printf("Days elapsed: %u\n", day);
         for (size_t i = 0; i < day; i++) {
-            printf("Number of people infected: %lld out of %lld\n", infectedCount[i], people);
+            printf("%lld\n", infectedCount[i]);
             //printf("Number of people recovered: %lld out of %d\n", recoveredCount[i], people);
         }
     }
@@ -601,7 +601,7 @@ int main(int argc, char *argv[]) {
     MPI_Reduce((void*)&recovered, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
         recovered = global_sum;
-        printf("Number of people recovered: %lld out of %lld\n", recovered, people);
+        //printf("Number of people recovered: %lld out of %lld\n", recovered, people);
     }
 
     global_sum = 0;
@@ -609,7 +609,7 @@ int main(int argc, char *argv[]) {
     MPI_Reduce((void*)&dead, (void*)&global_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
     if (world_rank == 0) {
         dead = global_sum;
-        printf("Number of people dead: %lld out of %lld\n", dead, people);
+       // printf("Number of people dead: %lld out of %lld\n", dead, people);
     }
 
 #ifdef DEBUG
