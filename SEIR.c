@@ -27,7 +27,7 @@
 #define PROC_FREQ 1600000000.0
 #else
 #define GetTimeBase MPI_Wtime
-/*double GetTimeBase() { return (double)clock() / CLOCKS_PER_SEC; }*/
+//double GetTimeBase() { return (double)clock() / CLOCKS_PER_SEC; }
 #define PROC_FREQ 1.0
 #endif
 
@@ -35,8 +35,8 @@
 /* Defines *****************************************************************/
 /***************************************************************************/
 
-#define GRID_SIZE 2048
-#define NUM_THREADS 16
+#define GRID_SIZE 512
+#define NUM_THREADS 0
 // May look into making ticks represent hours, up to a number of days?
 #define MAX_TICKS 1024
 #define POPULATION_RATE 50 // Out of 100
@@ -721,10 +721,10 @@ int main(int argc, char *argv[]) {
         dead_elders = global_sum;
     }
     if (world_rank == 0) {
-        printf("Age counts: Children: %lld\nAdules: %lld\nElders: %lld\n", num_children, num_adults, num_elders);
-        printf("Infected counts: Children: %lld\nAdults: %lld\nElders: %lld\n", infected_children, infected_adults,
+        printf("Age counts: \nChildren: %lld\nAdules: %lld\nElders: %lld\n", num_children, num_adults, num_elders);
+        printf("Infected counts: \nChildren: %lld\nAdults: %lld\nElders: %lld\n", infected_children, infected_adults,
                infected_elders);
-        printf("Death counts: Children: %lld\nAdults: %lld\nElders: %lld\n", dead_children, dead_adults, dead_elders);
+        printf("Death counts: \nChildren: %lld\nAdults: %lld\nElders: %lld\n", dead_children, dead_adults, dead_elders);
         printf("Days elapsed: %u\n", day);
     }
     DestroyBoard(&bc);
