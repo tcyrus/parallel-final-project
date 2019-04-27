@@ -35,8 +35,8 @@
 /* Defines *****************************************************************/
 /***************************************************************************/
 
-#define GRID_SIZE 512
-#define NUM_THREADS 0
+#define GRID_SIZE 64
+#define NUM_THREADS 4
 // May look into making ticks represent hours, up to a number of days?
 #define MAX_TICKS 1024
 #define POPULATION_RATE 50 // Out of 100
